@@ -1,0 +1,599 @@
+"""Composable DMX channel primitives (`RGB` and `Channel`), `FixtureGroup`s, and `Scene`s.
+
+At the core, the engine only understands two hardware primitives:
+  1. `RGB(dmx_channel)`     : 3 contiguous DMX channels (R, G, B)
+  2. `Channel(dmx_channel)` : 1 single DMX channel (with optional `default` and `dmx_range`)
+
+Calling a `FixtureGroup` with a `Clip`—e.g. `PARS(clip)` or `ALL_RGB(clip)`—produces a
+composable `Scene` supporting the same operators as `Clip`:
+  - `scene1 | scene2`  : Override (LTP) on overlapping DMX channels
+  - `scene1 + scene2`  : Additive blend (`min(1.0, a + b)`) on overlapping DMX channels
+  - `scene1 ^ scene2`  : HTP (`max(a, b)`) on overlapping DMX channels
+  - `scene1 >> scene2` : Play `scene1` followed by `scene2`
+  - `scene * n`        : Loop `scene` `n` times (or `* inf`)
+  - `scene @ duration` : Time-stretch `scene` to `duration` seconds
+  - `~scene`           : Time-reverse a finite `scene`
+  - `dim(factor, scene)` : Scale all active channels in `scene` by `factor`
+"""
+
+from __future__ import annotations
+from dataclasses import dataclass
+from math import inf
+from typing import Callable, Mapping, Optional, Sequence, Union
+
+from .clips import Clip
+from .state import Color, Patch
+
+
+def _to_dmx_byte(val: float, dmx_range: tuple[int, int] = (0, 255), zero_off: bool = False) -> int:
+    """Map normalized float [0.0, 1.0] to a DMX byte in `dmx_range`."""
+    low, high = dmx_range
+    if (zero_off or low > 0) and val <= 0.0:
+        return 0
+    clamped = max(0.0, min(1.0, val))
+    span = high - low
+    byte = int(round(low + clamped * span))
+    return max(low, min(high, byte))
+
+
+@dataclass(frozen=True)
+class Channel:
+    """A single DMX channel primitive (1 byte).
+
+    Args:
+        address: 1-based DMX channel number (1..512).
+        default: Default normalized value [0.0..1.0] when no clip sets this channel
+            (e.g. `default=1.0` for a master dimmer channel so RGB works out of the box).
+        dmx_range: Tuple of `(min_dmx, max_dmx)` when active. For example, `dmx_range=(11, 255)`
+            maps `0.0` to `0` (off) and `(0.0..1.0]` to `11..255`.
+    """
+    address: int
+    default: float = 0.0
+    dmx_range: tuple[int, int] = (0, 255)
+
+    @property
+    def max_channel(self) -> int:
+        return self.address
+
+    def write(self, dmx: list[int], val: float) -> None:
+        dmx[self.address - 1] = _to_dmx_byte(val, self.dmx_range)
+
+
+@dataclass(frozen=True)
+class RGB:
+    """A 3-channel RGB color primitive occupying `address`, `address+1`, `address+2`."""
+    address: int
+    default: Color = Color.BLACK
+
+    @property
+    def max_channel(self) -> int:
+        return self.address + 2
+
+    def write(self, dmx: list[int], color: Color) -> None:
+        idx = self.address - 1
+        dmx[idx] = _to_dmx_byte(color.r)
+        dmx[idx + 1] = _to_dmx_byte(color.g)
+        dmx[idx + 2] = _to_dmx_byte(color.b)
+
+
+PrimitiveSpec = Union[Channel, RGB]
+ElementPatch = Mapping[str, PrimitiveSpec]
+
+
+def _normalize_element(spec: Union[PrimitiveSpec, ElementPatch]) -> dict[str, PrimitiveSpec]:
+    """Normalize a single `Channel`, `RGB`, or attribute dict into `{attr_name: PrimitiveSpec}`."""
+    if isinstance(spec, RGB):
+        return {"color": spec}
+    if isinstance(spec, Channel):
+        return {"value": spec}
+    return dict(spec)
+
+
+# =============================================================================
+# Sparse DMX Frame Representation for Composable Scenes
+# =============================================================================
+
+
+@dataclass
+class DMXCanvas:
+    """Sparse normalized float [0.0, 1.0] DMX channel map before byte quantization.
+
+    Maps 1-based DMX channel address -> `(normalized_value, dmx_range)`.
+    """
+    values: dict[int, float]
+    ranges: dict[int, tuple[int, int]]
+    defaults: dict[int, tuple[float, tuple[int, int]]]
+
+    def __init__(self) -> None:
+        self.values = {}
+        self.ranges = {}
+        self.defaults = {}
+
+    def register_default(self, address: int, default_val: float, dmx_range: tuple[int, int] = (0, 255)) -> None:
+        if address not in self.defaults or default_val > 0.0:
+            self.defaults[address] = (default_val, dmx_range)
+
+    def set_channel(self, address: int, val: float, dmx_range: tuple[int, int] = (0, 255)) -> None:
+        self.values[address] = max(0.0, min(1.0, val))
+        self.ranges[address] = dmx_range
+
+    def merge(self, other: DMXCanvas, mode: str = "override") -> DMXCanvas:
+        """Combine two `DMXCanvas` instances using `'override'` (`|`), `'add'` (`+`), or `'htp'` (`^`)."""
+        out = DMXCanvas()
+        out.defaults.update(self.defaults)
+        out.defaults.update(other.defaults)
+
+        out.values.update(self.values)
+        out.ranges.update(self.ranges)
+
+        for addr, val in other.values.items():
+            rng = other.ranges.get(addr, (0, 255))
+            if addr not in out.values or mode == "override":
+                out.values[addr] = val
+                out.ranges[addr] = rng
+            elif mode == "add":
+                out.values[addr] = min(1.0, out.values[addr] + val)
+                out.ranges[addr] = rng
+            elif mode == "htp":
+                out.values[addr] = max(out.values[addr], val)
+                out.ranges[addr] = rng
+            else:
+                raise ValueError(f"Unknown merge mode: {mode}")
+        return out
+
+    def scale(self, factor: float) -> DMXCanvas:
+        out = DMXCanvas()
+        out.defaults.update(self.defaults)
+        out.ranges.update(self.ranges)
+        for addr, val in self.values.items():
+            out.values[addr] = max(0.0, min(1.0, val * factor))
+        return out
+
+    def to_dmx_list(self, min_size: int = 24) -> list[int]:
+        max_addr = max(
+            [min_size]
+            + list(self.values.keys())
+            + list(self.defaults.keys())
+        )
+        dmx = [0] * max_addr
+        for addr, (def_val, def_rng) in self.defaults.items():
+            dmx[addr - 1] = _to_dmx_byte(def_val, def_rng)
+        for addr, val in self.values.items():
+            rng = self.ranges.get(addr, (0, 255))
+            dmx[addr - 1] = _to_dmx_byte(val, rng)
+        return dmx
+
+
+# =============================================================================
+# FixtureGroup
+# =============================================================================
+
+
+class FixtureGroup:
+    """A logical array of fixtures, where each fixture element is a composition of `RGB` and/or `Channel`s.
+
+    Calling `group(clip)` binds `clip` to this `FixtureGroup` and returns a composable `Scene`.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        elements: Sequence[Union[PrimitiveSpec, ElementPatch]],
+    ) -> None:
+        if not elements:
+            raise ValueError("FixtureGroup requires at least one element.")
+        self.name = name
+        self.elements: tuple[dict[str, PrimitiveSpec], ...] = tuple(
+            _normalize_element(e) for e in elements
+        )
+
+    def __call__(self, clip: Clip) -> BoundScene:
+        """Bind `clip` to this `FixtureGroup`, returning an algebraically composable `Scene`!
+
+        Example:
+            `ALL_RGB(Rainbow()) + PAR_RGB(Pulse(Color.RED))`
+        """
+        return BoundScene(self, clip)
+
+    @classmethod
+    def from_template(
+        cls,
+        name: str,
+        template: Callable[[int], Union[PrimitiveSpec, ElementPatch]],
+        start_channels: Sequence[int],
+    ) -> FixtureGroup:
+        """Build a FixtureGroup by applying a user template function to each start channel."""
+        return cls(name=name, elements=[template(ch) for ch in start_channels])
+
+    @classmethod
+    def contiguous(
+        cls,
+        name: str,
+        profile: object,
+        start_channel: int,
+        count: int,
+    ) -> FixtureGroup:
+        """Helper for creating contiguous 1-channel or 3-channel groups."""
+        raise NotImplementedError("Use FixtureGroup(name, [Channel(...)]) or [RGB(...)] directly.")
+
+    def select(self, *attrs: str, name: Optional[str] = None) -> FixtureGroup:
+        """Extract a subset of attributes (e.g. `.select('w')` or `.select('color')`) as a new FixtureGroup view."""
+        if not attrs:
+            raise ValueError("Must specify at least one attribute name to select.")
+        sub_label = name or f"{self.name}.{','.join(attrs)}"
+        if len(attrs) == 1:
+            attr = attrs[0]
+            single_prim_list: list[Union[PrimitiveSpec, ElementPatch]] = []
+            for el in self.elements:
+                if attr not in el:
+                    raise KeyError(f"Attribute {attr!r} not found in fixture group {self.name!r}")
+                prim = el[attr]
+                if isinstance(prim, RGB):
+                    single_prim_list.append({"color": prim})
+                else:
+                    single_prim_list.append({attr: prim, "value": prim})
+            return FixtureGroup(name=sub_label, elements=single_prim_list)
+
+        multi_list: list[ElementPatch] = []
+        for el in self.elements:
+            sub = {a: el[a] for a in attrs if a in el}
+            multi_list.append(sub)
+        return FixtureGroup(name=sub_label, elements=multi_list)
+
+    def named(self, name: str) -> FixtureGroup:
+        """Return a copy of this FixtureGroup with a custom display name."""
+        return FixtureGroup(name=name, elements=self.elements)
+
+    def __add__(self, other: FixtureGroup) -> FixtureGroup:
+        """`group1 + group2`: Concatenate two FixtureGroups into a combined group."""
+        if not isinstance(other, FixtureGroup):
+            return NotImplemented
+        return FixtureGroup(
+            name=f"{self.name}+{other.name}",
+            elements=self.elements + other.elements,
+        )
+
+    def __getitem__(self, item: Union[int, slice]) -> FixtureGroup:
+        """Slice or index a FixtureGroup (e.g. `PAR_RGB[:2] + STROBE_RGB + PAR_RGB[2:]`)."""
+        if isinstance(item, int):
+            return FixtureGroup(name=f"{self.name}[{item}]", elements=[self.elements[item]])
+        if isinstance(item, slice):
+            sliced = self.elements[item]
+            return FixtureGroup(name=f"{self.name}[slice]", elements=sliced)
+        raise TypeError(f"Invalid index type: {type(item)}")
+
+    def __len__(self) -> int:
+        return len(self.elements)
+
+    @property
+    def count(self) -> int:
+        return len(self.elements)
+
+    @property
+    def max_channel(self) -> int:
+        return max(
+            prim.max_channel
+            for el in self.elements
+            for prim in el.values()
+        )
+
+    def write_defaults(self, dmx: list[int]) -> None:
+        """Write each primitive's default value into `dmx`."""
+        for el in self.elements:
+            for prim in el.values():
+                if isinstance(prim, RGB):
+                    prim.write(dmx, prim.default)
+                elif isinstance(prim, Channel):
+                    prim.write(dmx, prim.default)
+
+    def register_canvas_defaults(self, canvas: DMXCanvas) -> None:
+        """Register each primitive's default value into a `DMXCanvas`."""
+        for el in self.elements:
+            for prim in el.values():
+                if isinstance(prim, RGB):
+                    canvas.register_default(prim.address, prim.default.r)
+                    canvas.register_default(prim.address + 1, prim.default.g)
+                    canvas.register_default(prim.address + 2, prim.default.b)
+                elif isinstance(prim, Channel):
+                    canvas.register_default(prim.address, prim.default, prim.dmx_range)
+
+    def render_patches(self, clip: Clip, t: float) -> list[Patch]:
+        """Evaluate `clip` at time `t` across all fixture elements in this group."""
+        return [
+            clip.eval(t, fixture=i, total_fixtures=self.count)
+            for i in range(self.count)
+        ]
+
+    def write_canvas(self, canvas: DMXCanvas, clip: Clip, t: float) -> None:
+        """Evaluate `clip` at time `t` and write active normalized values into `canvas`."""
+        self.register_canvas_defaults(canvas)
+        patches = self.render_patches(clip, t)
+        for el, patch in zip(self.elements, patches):
+            for attr, prim in el.items():
+                if isinstance(prim, RGB):
+                    if patch.color is not None:
+                        canvas.set_channel(prim.address, patch.color.r)
+                        canvas.set_channel(prim.address + 1, patch.color.g)
+                        canvas.set_channel(prim.address + 2, patch.color.b)
+                elif isinstance(prim, Channel):
+                    val: Optional[float] = None
+                    if attr in patch.channels:
+                        val = patch.channels[attr]
+                    elif "value" in patch.channels and len(el) <= 2 and "value" in el:
+                        val = patch.channels["value"]
+                    elif (attr == "value" or len(el) == 1) and patch.color is not None:
+                        val = patch.color.max_component
+                    if val is not None:
+                        canvas.set_channel(prim.address, val, prim.dmx_range)
+
+    def write_dmx(self, dmx: list[int], clip: Clip, t: float) -> None:
+        """Evaluate `clip` at time `t` and write all mapped primitives into `dmx`."""
+        patches = self.render_patches(clip, t)
+        for el, patch in zip(self.elements, patches):
+            for attr, prim in el.items():
+                if isinstance(prim, RGB):
+                    if patch.color is not None:
+                        prim.write(dmx, patch.color)
+                elif isinstance(prim, Channel):
+                    val: Optional[float] = None
+                    if attr in patch.channels:
+                        val = patch.channels[attr]
+                    elif "value" in patch.channels and len(el) <= 2 and "value" in el:
+                        val = patch.channels["value"]
+                    elif (attr == "value" or len(el) == 1) and patch.color is not None:
+                        val = patch.color.max_component
+                    if val is not None:
+                        prim.write(dmx, val)
+
+    def preview_from_dmx(self, dmx: Sequence[int]) -> str:
+        """Render a 24-bit ANSI terminal preview of this FixtureGroup directly from a DMX frame!"""
+        blocks: list[str] = []
+        for el in self.elements:
+            has_rgb = any(isinstance(p, RGB) for p in el.values())
+            if not has_rgb:
+                # Monochrome channel group
+                b_val = 0
+                for prim in el.values():
+                    if isinstance(prim, Channel) and prim.address - 1 < len(dmx):
+                        b_val = dmx[prim.address - 1]
+                        break
+                blocks.append(f"\033[48;2;{b_val};{b_val};{b_val}m \033[0m")
+            else:
+                r_b, g_b, b_b = 0, 0, 0
+                w_b = 0
+                dim_b = 255
+                strobe_b = 0
+                for attr, prim in el.items():
+                    if isinstance(prim, RGB) and prim.address + 1 < len(dmx):
+                        idx = prim.address - 1
+                        r_b, g_b, b_b = dmx[idx], dmx[idx + 1], dmx[idx + 2]
+                    elif isinstance(prim, Channel) and prim.address - 1 < len(dmx):
+                        val_b = dmx[prim.address - 1]
+                        if attr == "w":
+                            w_b = val_b
+                        elif attr == "dimmer":
+                            dim_b = val_b
+                        elif attr == "strobe":
+                            strobe_b = val_b
+                scale = dim_b / 255.0
+                r_out = min(255, int((r_b + w_b * 0.85) * scale))
+                g_out = min(255, int((g_b + w_b * 0.85) * scale))
+                b_out = min(255, int((b_b + w_b * 0.85) * scale))
+                if "strobe" in el:
+                    ind = "⚡" if strobe_b > 0 else " "
+                    blocks.append(f"\033[48;2;{r_out};{g_out};{b_out}m {ind}\033[0m")
+                else:
+                    blocks.append(f"\033[48;2;{r_out};{g_out};{b_out}m \033[0m")
+        return f"{self.name}:[{''.join(blocks)}]"
+
+    def preview_str(self, clip: Clip, t: float) -> str:
+        """Render a compact 24-bit ANSI terminal visualization of this group at time `t`."""
+        dmx = [0] * self.max_channel
+        self.write_defaults(dmx)
+        self.write_dmx(dmx, clip, t)
+        return self.preview_from_dmx(dmx)
+
+
+# =============================================================================
+# Composable Multi-Group Scenes (`GROUP(clip)`)
+# =============================================================================
+
+
+class Scene:
+    """Base class for algebraically composable multi-fixture scenes."""
+
+    duration: float = 0.0
+
+    def eval_canvas(self, t: float) -> DMXCanvas:
+        raise NotImplementedError
+
+    def groups(self) -> list[FixtureGroup]:
+        raise NotImplementedError
+
+    def __or__(self, other: Scene) -> LayerScene:
+        """`scene1 | scene2`: Parallel override (LTP) on overlapping DMX channels."""
+        return LayerScene(self, other, mode="override")
+
+    def __add__(self, other: Scene) -> LayerScene:
+        """`scene1 + scene2`: Parallel additive blend (`min(1.0, a + b)`) on overlapping DMX channels."""
+        return LayerScene(self, other, mode="add")
+
+    def __xor__(self, other: Scene) -> LayerScene:
+        """`scene1 ^ scene2`: Parallel HTP (`max(a, b)`) on overlapping DMX channels."""
+        return LayerScene(self, other, mode="htp")
+
+    def __rshift__(self, other: Scene) -> SequenceScene:
+        """`scene1 >> scene2`: Play `scene1` then `scene2` sequentially."""
+        return SequenceScene(self, other)
+
+    def __mul__(self, count: Union[int, float]) -> RepeatScene:
+        """`scene * n`: Loop `scene` `n` times (or `scene * inf`)."""
+        if count == inf or count == float("inf"):
+            return RepeatScene(self, count=inf)
+        if isinstance(count, int) or (isinstance(count, float) and count.is_integer()):
+            return RepeatScene(self, count=int(count))
+        raise ValueError("Use integer or `inf` with `*` for repeating, or `dim(factor, scene)` for brightness.")
+
+    def __rmul__(self, count: Union[int, float]) -> RepeatScene:
+        return self.__mul__(count)
+
+    def __matmul__(self, target_duration: float) -> TimeScaleScene:
+        """`scene @ duration`: Stretch or compress a finite scene to `target_duration` seconds."""
+        return TimeScaleScene(self, target_duration)
+
+    def __invert__(self) -> ReverseScene:
+        """`~scene`: Play a finite scene backwards in time."""
+        return ReverseScene(self)
+
+    def dim(self, factor: float) -> ScaleScene:
+        """Scale all active channel values in this scene by `factor`."""
+        return ScaleScene(self, factor)
+
+    def scale(self, factor: float) -> ScaleScene:
+        return ScaleScene(self, factor)
+
+
+class BoundScene(Scene):
+    """A `Clip` bound to a specific `FixtureGroup` (`group(clip)`)."""
+
+    def __init__(self, group: FixtureGroup, clip: Clip) -> None:
+        self.group = group
+        self.clip = clip
+        self.duration = clip.duration
+
+    def eval_canvas(self, t: float) -> DMXCanvas:
+        canvas = DMXCanvas()
+        if t <= self.duration:
+            self.group.write_canvas(canvas, self.clip, t)
+        else:
+            self.group.register_canvas_defaults(canvas)
+        return canvas
+
+    def groups(self) -> list[FixtureGroup]:
+        return [self.group]
+
+
+class LayerScene(Scene):
+    """Parallel composition of two `Scene`s (`|`, `+`, or `^`)."""
+
+    def __init__(self, bottom: Scene, top: Scene, mode: str = "override") -> None:
+        self.bottom = bottom
+        self.top = top
+        self.mode = mode
+        if bottom.duration == inf or top.duration == inf:
+            self.duration = inf
+        else:
+            self.duration = max(bottom.duration, top.duration)
+
+    def eval_canvas(self, t: float) -> DMXCanvas:
+        c_bot = self.bottom.eval_canvas(t)
+        c_top = self.top.eval_canvas(t)
+        return c_bot.merge(c_top, mode=self.mode)
+
+    def groups(self) -> list[FixtureGroup]:
+        seen: dict[str, FixtureGroup] = {}
+        for g in self.bottom.groups() + self.top.groups():
+            seen.setdefault(g.name, g)
+        return list(seen.values())
+
+
+class SequenceScene(Scene):
+    """Sequential composition of `Scene`s (`scene1 >> scene2`)."""
+
+    def __init__(self, *scenes: Scene) -> None:
+        flattened: list[Scene] = []
+        for s in scenes:
+            if isinstance(s, SequenceScene):
+                flattened.extend(s.scenes)
+            else:
+                flattened.append(s)
+        self.scenes = flattened
+        self.duration = sum(s.duration for s in self.scenes)
+
+    def eval_canvas(self, t: float) -> DMXCanvas:
+        if not self.scenes:
+            return DMXCanvas()
+        elapsed = 0.0
+        for i, scene in enumerate(self.scenes):
+            if t < elapsed + scene.duration or i == len(self.scenes) - 1:
+                local_t = max(0.0, min(scene.duration, t - elapsed))
+                return scene.eval_canvas(local_t)
+            elapsed += scene.duration
+        return self.scenes[-1].eval_canvas(self.scenes[-1].duration)
+
+    def groups(self) -> list[FixtureGroup]:
+        seen: dict[str, FixtureGroup] = {}
+        for s in self.scenes:
+            for g in s.groups():
+                seen.setdefault(g.name, g)
+        return list(seen.values())
+
+
+class RepeatScene(Scene):
+    """Loops a finite `Scene` `count` times (`scene * n` or `scene * inf`)."""
+
+    def __init__(self, child: Scene, count: Union[int, float] = inf) -> None:
+        if child.duration <= 0:
+            raise ValueError("Cannot repeat a scene with 0 duration.")
+        self.child = child
+        self.count = count
+        self.duration = child.duration * count
+
+    def eval_canvas(self, t: float) -> DMXCanvas:
+        if self.child.duration == inf:
+            return self.child.eval_canvas(t)
+        if t >= self.duration:
+            return self.child.eval_canvas(self.child.duration)
+        return self.child.eval_canvas(t % self.child.duration)
+
+    def groups(self) -> list[FixtureGroup]:
+        return self.child.groups()
+
+
+class TimeScaleScene(Scene):
+    """Stretches or compresses a finite `Scene` to `target_duration` (`scene @ seconds`)."""
+
+    def __init__(self, child: Scene, target_duration: float) -> None:
+        if child.duration == inf or child.duration <= 0:
+            raise ValueError("Can only time-scale finite scenes with positive duration.")
+        self.child = child
+        self.duration = float(target_duration)
+        self.rate = child.duration / self.duration
+
+    def eval_canvas(self, t: float) -> DMXCanvas:
+        return self.child.eval_canvas(t * self.rate)
+
+    def groups(self) -> list[FixtureGroup]:
+        return self.child.groups()
+
+
+class ReverseScene(Scene):
+    """Reverses time for a finite `Scene` (`~scene`)."""
+
+    def __init__(self, child: Scene) -> None:
+        if child.duration == inf:
+            raise ValueError("Cannot time-reverse an infinite scene.")
+        self.child = child
+        self.duration = child.duration
+
+    def eval_canvas(self, t: float) -> DMXCanvas:
+        local_t = max(0.0, min(self.duration, self.duration - t))
+        return self.child.eval_canvas(local_t)
+
+    def groups(self) -> list[FixtureGroup]:
+        return self.child.groups()
+
+
+class ScaleScene(Scene):
+    """Scales all active channel values in `child` by `factor` (`dim(factor, scene)`)."""
+
+    def __init__(self, child: Scene, factor: float) -> None:
+        self.child = child
+        self.factor = factor
+        self.duration = child.duration
+
+    def eval_canvas(self, t: float) -> DMXCanvas:
+        return self.child.eval_canvas(t).scale(self.factor)
+
+    def groups(self) -> list[FixtureGroup]:
+        return self.child.groups()
