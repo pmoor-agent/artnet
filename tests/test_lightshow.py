@@ -24,6 +24,7 @@ from my_rig import (
     PAR_WHITES,
     PARS,
     STROBE_BAR,
+    STROBE_MASTER,
     STROBE_RGB,
     STROBE_W,
     create_rig,
@@ -87,29 +88,30 @@ class TestLightshow(unittest.TestCase):
     def test_unified_and_split_views_composition(self) -> None:
         rig = create_rig(dry_run=True)
 
-        # 1. Test driving STROBE_W and STROBE_RGB as split views with dim()
+        # 1. Test driving STROBE_W (CW) and STROBE_RGB as split views with dim()
+        # In 24ch mode: 4 segments (Ch 32..36, 37..41, 42..46, 47..51)
         dmx_split = rig.render_dmx(
             {
                 PARS: Hold(Color.BLACK, duration=1.0),
-                STROBE_W: dim(0.25, Hold(1.0, duration=1.0).on(0, 7)),
-                STROBE_RGB: dim(0.35, Hold(Color.CYAN, duration=1.0).on(0, 7)),
+                STROBE_W: dim(0.25, Hold(1.0, duration=1.0).on(0, 3)),
+                STROBE_RGB: dim(0.35, Hold(Color.CYAN, duration=1.0).on(0, 3)),
             },
             t=0.5,
         )
-        self.assertEqual(len(dmx_split), 63)
-        self.assertEqual(dmx_split[31:39], [64, 0, 0, 0, 0, 0, 0, 64])
-        self.assertEqual(dmx_split[39:42], [0, 89, 89])
-        self.assertEqual(dmx_split[60:63], [0, 89, 89])
+        self.assertEqual(len(dmx_split), 52)
+        # Seg 1 RGB (ch 32..34 -> indices 31..33): 0, 89, 89
+        self.assertEqual(dmx_split[31:34], [0, 89, 89])
+        # Seg 1 CW (ch 36 -> index 35): 64
+        self.assertEqual(dmx_split[35], 64)
 
-        # 2. Test driving STROBE_BAR as a single unified 8-segment RGBW fixture!
+        # 2. Test driving STROBE_BAR as a unified RGB + WW + CW fixture
         unified_clip = (
-            dim(0.35, Hold(Color.CYAN, duration=1.0).on(0, 7))
-            | dim(0.25, ch("w", Hold(1.0, duration=1.0).on(0, 7)))
+            dim(0.35, Hold(Color.CYAN, duration=1.0).on(0, 3))
+            | dim(0.25, ch("cw", Hold(1.0, duration=1.0).on(0, 3)))
         )
         dmx_unified = rig.render_dmx({STROBE_BAR: unified_clip}, t=0.5)
-        self.assertEqual(dmx_unified[31:39], [64, 0, 0, 0, 0, 0, 0, 64])
-        self.assertEqual(dmx_unified[39:42], [0, 89, 89])
-        self.assertEqual(dmx_unified[60:63], [0, 89, 89])
+        self.assertEqual(dmx_unified[31:34], [0, 89, 89])
+        self.assertEqual(dmx_unified[35], 64)
 
         # 3. Test driving sliced PAR sub-channels (PAR_WHITES, PAR_DIMMERS, PAR_STROBES)
         dmx_par_slices = rig.render_dmx(
@@ -126,39 +128,42 @@ class TestLightshow(unittest.TestCase):
         # PAR 4 (ch 19..24): R=255, G=0, B=0, W=0, Dimmer=128, Strobe=255
         self.assertEqual(dmx_par_slices[18:24], [255, 0, 0, 0, 128, 255])
 
+        # 4. Test driving STROBE_MASTER at channel 52 (dmx index 51)
+        dmx_master = rig.render_dmx({STROBE_MASTER: Hold(0.5, duration=1.0)}, t=0.5)
+        self.assertEqual(dmx_master[51], 132)
+
     def test_combining_fixture_groups_with_plus_and_slicing(self) -> None:
         from my_rig import ALL_RGB, ALL_WHITES, PAR_RGB, STAGE_RGB, STROBE_RGB
 
         rig = create_rig(dry_run=True)
 
-        # ALL_RGB = PAR_RGB (4) + STROBE_RGB (8) -> 12 RGB elements
-        self.assertEqual(len(ALL_RGB), 12)
-        self.assertEqual(len(ALL_WHITES), 12)
-        self.assertEqual(len(STAGE_RGB), 12)
+        # ALL_RGB = PAR_RGB (4) + STROBE_RGB (4) -> 8 RGB elements
+        self.assertEqual(len(ALL_RGB), 8)
+        self.assertEqual(len(ALL_WHITES), 8)
+        self.assertEqual(len(STAGE_RGB), 8)
 
-        # Drive index 0 (PAR 1) and index 11 (Strobe RGB 8) via ALL_RGB
-        # Notice we can even use `.on(4, 5, 6, 7, 8, 9, 10, 11)` or dim the strobe portion!
+        # Drive index 0 (PAR 1) and index 7 (Strobe RGB 4) via ALL_RGB
         dmx = rig.render_dmx(
             {
-                ALL_RGB: Hold(Color.MAGENTA, duration=1.0).on(0, 11),
+                ALL_RGB: Hold(Color.MAGENTA, duration=1.0).on(0, 7),
             },
             t=0.5,
         )
-        # PAR 1 (ch 1..6): R=255, G=0, B=255, W=0, Dimmer=255 (from default!), Strobe=0
+        # PAR 1 (ch 1..6): R=255, G=0, B=255, W=0, Dimmer=255, Strobe=0
         self.assertEqual(dmx[0:6], [255, 0, 255, 0, 255, 0])
-        # Strobe RGB 8 (ch 61..63 -> indices 60..62): R=255, G=0, B=255
-        self.assertEqual(dmx[60:63], [255, 0, 255])
+        # Strobe RGB 4 (ch 47..49 -> indices 46..48): R=255, G=0, B=255
+        self.assertEqual(dmx[46:49], [255, 0, 255])
 
         # Test STAGE_RGB = PAR_RGB[:2] + STROBE_RGB + PAR_RGB[2:]
-        # Index 0, 1 are PAR 1, 2; Index 2 is Strobe RGB 1; Index 11 is PAR 4
+        # Index 0, 1 are PAR 1, 2; Index 2 is Strobe RGB 1; Index 7 is PAR 4
         dmx_stage = rig.render_dmx(
             {
-                STAGE_RGB: Hold(Color.GREEN, duration=1.0).on(2, 11),
+                STAGE_RGB: Hold(Color.GREEN, duration=1.0).on(2, 7),
             },
             t=0.5,
         )
-        # Strobe RGB 1 (ch 40..42 -> indices 39..41) is GREEN
-        self.assertEqual(dmx_stage[39:42], [0, 255, 0])
+        # Strobe RGB 1 (ch 32..34 -> indices 31..33) is GREEN
+        self.assertEqual(dmx_stage[31:34], [0, 255, 0])
         # PAR 4 (ch 19..24 -> indices 18..23) is GREEN with default Dimmer=255
         self.assertEqual(dmx_stage[18:24], [0, 255, 0, 0, 255, 0])
 
@@ -167,31 +172,29 @@ class TestLightshow(unittest.TestCase):
 
         rig = create_rig(dry_run=True)
 
-        # Suppose ALL_RGB sets Red=0.4 on all 12 RGB fixtures, and PAR_RGB concurrently sets
-        # Red=0.5, Blue=0.6 on PAR 1..4.
+        # ALL_RGB sets Red=0.4 on all 8 RGB elements, PAR_RGB sets Red=0.5, Blue=0.6 on PAR 1..4
         s_all = ALL_RGB(Hold(Color(0.4, 0.0, 0.0), duration=1.0))
         s_par = PAR_RGB(Hold(Color(0.5, 0.0, 0.6), duration=1.0))
 
         # 1. Additive (`+`): overlapping channels add (R = 0.4 + 0.5 = 0.9 -> 230, B = 0.6 -> 153)
         dmx_add = rig.render_dmx(s_all + s_par, t=0.5)
         self.assertEqual(dmx_add[0:3], [230, 0, 153])   # PAR 1 (overlapped: 0.4 + 0.5 = 0.9)
-        self.assertEqual(dmx_add[39:42], [102, 0, 0])   # Strobe RGB 1 (untouched by PAR_RGB: 0.4 -> 102)
+        self.assertEqual(dmx_add[31:34], [102, 0, 0])   # Strobe RGB 1 (untouched by PAR_RGB: 0.4 -> 102)
 
-        # 2. Override / LTP (`|`): PAR_RGB overrides ALL_RGB on PAR 1..4 (R = 0.5 -> 128, B = 0.6 -> 153)
+        # 2. Override / LTP (`|`): PAR_RGB overrides ALL_RGB on PAR 1..4
         dmx_ltp = rig.render_dmx(s_all | s_par, t=0.5)
         self.assertEqual(dmx_ltp[0:3], [128, 0, 153])
-        self.assertEqual(dmx_ltp[39:42], [102, 0, 0])
+        self.assertEqual(dmx_ltp[31:34], [102, 0, 0])
 
         # 3. HTP (`^`): Highest Takes Precedence per DMX channel (`max(a, b)`)
         s_par_low_r = PAR_RGB(Hold(Color(0.2, 0.0, 0.8), duration=1.0))
         dmx_htp = rig.render_dmx(s_all ^ s_par_low_r, t=0.5)
-        # R takes max(0.4, 0.2) = 0.4 -> 102; B takes max(0.0, 0.8) = 0.8 -> 204
         self.assertEqual(dmx_htp[0:3], [102, 0, 204])
 
         # 4. Sequential composition of multi-group scenes (`scene1 >> scene2`)
         seq_scene = (s_all | STROBE_RGB(dim(0.5, Hold(Color.GREEN, duration=1.0)))) >> s_par
         self.assertEqual(seq_scene.duration, 2.0)
-        self.assertEqual(rig.render_dmx(seq_scene, t=0.5)[39:42], [0, 128, 0])
+        self.assertEqual(rig.render_dmx(seq_scene, t=0.5)[31:34], [0, 128, 0])
         self.assertEqual(rig.render_dmx(seq_scene, t=1.5)[0:3], [128, 0, 153])
 
     def test_time_scaling_reverse_and_repeat(self) -> None:

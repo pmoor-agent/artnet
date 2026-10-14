@@ -200,6 +200,7 @@ class Rig:
         )
         frame_interval = 1.0 / self.fps
         start_time = time.monotonic()
+        next_frame_time = start_time
 
         try:
             while True:
@@ -215,10 +216,13 @@ class Rig:
                 if preview:
                     self._print_preview_line(preview_groups, dmx, t)
 
-                elapsed = time.monotonic() - now
-                sleep_for = frame_interval - elapsed
+                next_frame_time += frame_interval
+                sleep_for = next_frame_time - time.monotonic()
                 if sleep_for > 0:
                     time.sleep(sleep_for)
+                elif sleep_for < -frame_interval:
+                    # If we fell behind by more than a full frame, resync schedule
+                    next_frame_time = time.monotonic()
         except KeyboardInterrupt:
             if preview:
                 print("\nStopped by user.")

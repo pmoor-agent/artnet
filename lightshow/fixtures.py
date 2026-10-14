@@ -319,7 +319,7 @@ class FixtureGroup:
                     val: Optional[float] = None
                     if attr in patch.channels:
                         val = patch.channels[attr]
-                    elif "value" in patch.channels and len(el) <= 2 and "value" in el:
+                    elif "value" in patch.channels and (len(el) == 1 or "value" in el):
                         val = patch.channels["value"]
                     elif (attr == "value" or len(el) == 1) and patch.color is not None:
                         val = patch.color.max_component
@@ -338,7 +338,7 @@ class FixtureGroup:
                     val: Optional[float] = None
                     if attr in patch.channels:
                         val = patch.channels[attr]
-                    elif "value" in patch.channels and len(el) <= 2 and "value" in el:
+                    elif "value" in patch.channels and (len(el) == 1 or "value" in el):
                         val = patch.channels["value"]
                     elif (attr == "value" or len(el) == 1) and patch.color is not None:
                         val = patch.color.max_component
@@ -353,11 +353,15 @@ class FixtureGroup:
             if not has_rgb:
                 # Monochrome channel group
                 b_val = 0
+                is_strobe = any("strobe" in attr for attr in el)
                 for prim in el.values():
                     if isinstance(prim, Channel) and prim.address - 1 < len(dmx):
                         b_val = dmx[prim.address - 1]
                         break
-                blocks.append(f"\033[48;2;{b_val};{b_val};{b_val}m \033[0m")
+                if is_strobe and b_val > 0:
+                    blocks.append(f"\033[48;2;{b_val};{b_val};{b_val}m⚡\033[0m")
+                else:
+                    blocks.append(f"\033[48;2;{b_val};{b_val};{b_val}m \033[0m")
             else:
                 r_b, g_b, b_b = 0, 0, 0
                 w_b = 0
@@ -369,8 +373,8 @@ class FixtureGroup:
                         r_b, g_b, b_b = dmx[idx], dmx[idx + 1], dmx[idx + 2]
                     elif isinstance(prim, Channel) and prim.address - 1 < len(dmx):
                         val_b = dmx[prim.address - 1]
-                        if attr == "w":
-                            w_b = val_b
+                        if attr in ("w", "cw", "ww"):
+                            w_b = max(w_b, val_b)
                         elif attr == "dimmer":
                             dim_b = val_b
                         elif attr == "strobe":

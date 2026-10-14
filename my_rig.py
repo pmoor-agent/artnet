@@ -1,4 +1,4 @@
-"""User hardware configuration for 192.168.1.17 (Universe 1, 40Hz DMX).
+"""User hardware configuration for 192.168.1.158 (Universe 1, 40Hz DMX).
 
 The `lightshow` engine only knows about two DMX primitives:
   - `RGB(address)`     : 3-channel RGB color triplet
@@ -37,37 +37,58 @@ PAR_STROBES = PARS.select("strobe", name="PAR_STR")
 
 
 # =============================================================================
-# 2. 8-Segment RGBW Strobe Bar (Channels 32..39 = 8x White, Channels 40..63 = 8x RGB)
+# 2. 4-Segment Strobe Bar in 24-Channel Mode (starting at Channel 32)
+#    Per manual:
+#      Seg 1: Ch 1-3 RGB, Ch 4 WW, Ch 5 CW
+#      Seg 2: Ch 6-8 RGB, Ch 9 WW, Ch 10 CW
+#      Seg 3: Ch 11-13 RGB, Ch 14 WW, Ch 15 CW
+#      Seg 4: Ch 16-18 RGB, Ch 19 WW, Ch 20 CW
+#      Master Strobe: Ch 21 (0-8: off, 9-255: strobe rate)
+#      Ch 22-24: Autoprograms (left at 0)
 # =============================================================================
 
-# Unified 8-segment RGBW Strobe Bar (each segment `i` combines White at 32+i and RGB at 40+3*i!)
+STROBE_START = 32
+
+def _strobe_seg(i: int) -> dict[str, RGB | Channel]:
+    # Segment i base offset: i * 5 channels
+    base = STROBE_START + i * 5
+    return {
+        "color": RGB(base),
+        "ww":    Channel(base + 3),
+        "cw":    Channel(base + 4),
+        "w":     Channel(base + 4),  # Default 'w' maps to cold white (or ww+cw)
+    }
+
+# Unified 4-segment strobe fixture with RGB, WW, CW per segment:
 STROBE_BAR = FixtureGroup(
     name="STROBE_BAR",
-    elements=[
-        {
-            "w":     Channel(32 + i),
-            "color": RGB(40 + i * 3),
-        }
-        for i in range(8)
-    ],
+    elements=[_strobe_seg(i) for i in range(4)],
 )
 
-# Or use the split 8-White and 8-RGB views sliced directly from STROBE_BAR:
-STROBE_W   = STROBE_BAR.select("w",     name="W8")
-STROBE_RGB = STROBE_BAR.select("color", name="RGB8")
+# Dedicated sub-views:
+STROBE_RGB = STROBE_BAR.select("color", name="STROBE_RGB")
+STROBE_WW  = STROBE_BAR.select("ww",    name="STROBE_WW")
+STROBE_CW  = STROBE_BAR.select("cw",    name="STROBE_CW")
+STROBE_W   = STROBE_CW  # Alias for existing scripts expecting STROBE_W
+
+# Master strobe channel on the strobe bar (Channel 21 from base = Channel 52):
+STROBE_MASTER = FixtureGroup(
+    name="STROBE_MASTER",
+    elements=[{"strobe": Channel(STROBE_START + 20, dmx_range=(9, 255))}],
+)
 
 
 # =============================================================================
 # 3. Combined Cross-Fixture Groups (`+` concatenation & slicing)
 # =============================================================================
 
-# All 12 RGB elements across the entire rig (4 PARs + 8 Strobe RGB segments):
+# All 8 RGB elements across the entire rig (4 PARs + 4 Strobe RGB segments):
 ALL_RGB = PAR_RGB + STROBE_RGB
 
-# All 12 White channels across the entire rig (4 PAR Whites + 8 Strobe White segments):
+# All 8 White channels across the entire rig (4 PAR Whites + 4 Strobe Cold White segments):
 ALL_WHITES = PAR_WHITES + STROBE_W
 
-# Spatial stage layout (e.g. if the strobe bar sits in the middle between PARs 1-2 and PARs 3-4):
+# Spatial stage layout: PARs 1-2 -> Strobe Segments 1-4 -> PARs 3-4:
 STAGE_RGB = (PAR_RGB[:2] + STROBE_RGB + PAR_RGB[2:]).named("STAGE_RGB")
 
 
@@ -76,7 +97,7 @@ STAGE_RGB = (PAR_RGB[:2] + STROBE_RGB + PAR_RGB[2:]).named("STAGE_RGB")
 # =============================================================================
 
 def create_rig(
-    host: str = "192.168.1.17",
+    host: str = "192.168.1.158",
     universe: int = 1,
     universe_base: int = 0,
     fps: float = 40.0,
@@ -84,7 +105,7 @@ def create_rig(
 ) -> Rig:
     """Create the configured Rig for this physical setup."""
     return Rig(
-        groups=[PARS, STROBE_W, STROBE_RGB],
+        groups=[PARS, STROBE_RGB, STROBE_WW, STROBE_CW, STROBE_MASTER],
         host=host,
         universe=universe,
         universe_base=universe_base,
@@ -96,7 +117,7 @@ def create_rig(
 def run_show_cli(description: str, scene) -> None:
     """Standard CLI runner for any show built for this rig."""
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("--host", default="192.168.1.17", help="Art-Net node IP (default: 192.168.1.17)")
+    parser.add_argument("--host", default="192.168.1.158", help="Art-Net node IP (default: 192.168.1.158)")
     parser.add_argument("--universe", type=int, default=1, help="Universe number (default: 1)")
     parser.add_argument(
         "--universe-base",
