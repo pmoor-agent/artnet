@@ -5,6 +5,7 @@ from math import inf
 from .artnet import ARTNET_PORT, ArtNetClient, Rig, build_artdmx_packet
 from .clips import (
     Blackout,
+    CCT,
     ChannelMapClip,
     Chase,
     Clip,
@@ -12,6 +13,7 @@ from .clips import (
     Ease,
     EnvelopeClip,
     Fade,
+    FadeCCT,
     FnClip,
     Gradient,
     Hold,
@@ -34,6 +36,7 @@ from .clips import (
     Wait,
     ch,
     dim,
+    kelvin_to_ww_cw,
 )
 from .fixtures import (
     RGB,
@@ -56,6 +59,7 @@ __all__ = [
     "ArtNetClient",
     "Blackout",
     "BoundScene",
+    "CCT",
     "Channel",
     "ChannelMapClip",
     "Chase",
@@ -64,7 +68,9 @@ __all__ = [
     "DMXCanvas",
     "DimmerLFO",
     "Ease",
+    "EnvelopeClip",
     "Fade",
+    "FadeCCT",
     "FixtureGroup",
     "FnClip",
     "Gradient",
@@ -100,4 +106,5 @@ __all__ = [
     "ch",
     "dim",
     "inf",
+    "kelvin_to_ww_cw",
 ]

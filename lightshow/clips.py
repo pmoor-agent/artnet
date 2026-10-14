@@ -783,3 +783,61 @@ class FnClip(Clip):
         if isinstance(res, Color):
             return Patch(color=res)
         return res
+
+
+def kelvin_to_ww_cw(kelvin: float, brightness: float = 1.0) -> tuple[float, float]:
+    """Calculate normalized (ww, cw) levels in [0.0, 1.0] for a target color temperature in Kelvin.
+
+    Calibrated to the Eurolite BCL 2in1 CW/WW LED specs (Warm White = 3200K, Cold White = 6600K).
+    Interpolates in perceptual mired (micro-reciprocal degree) space.
+    """
+    k = max(3200.0, min(6600.0, float(kelvin)))
+    mired_warm = 1e6 / 3200.0  # 312.50
+    mired_cold = 1e6 / 6600.0  # 151.52
+    mired_target = 1e6 / k
+    ww_ratio = (mired_target - mired_cold) / (mired_warm - mired_cold)
+    cw_ratio = 1.0 - ww_ratio
+    scale = max(0.0, min(1.0, float(brightness)))
+    return (ww_ratio * scale, cw_ratio * scale)
+
+
+class CCT(Clip):
+    """Hold a specific correlated color temperature in Kelvin (3200K - 6600K).
+
+    Controls both 'ww' and 'cw' channels according to the physical BCL LED mixing curve.
+    """
+
+    def __init__(self, kelvin: float, brightness: float = 1.0, duration: float = inf) -> None:
+        self.kelvin = float(kelvin)
+        self.brightness = float(brightness)
+        self.duration = float(duration)
+        ww, cw = kelvin_to_ww_cw(self.kelvin, self.brightness)
+        self.channels = {"ww": ww, "cw": cw, "w": cw}
+
+    def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
+        return Patch(channels=dict(self.channels))
+
+
+class FadeCCT(Clip):
+    """Smoothly transition correlated color temperature between `start_k` and `end_k` over `duration`."""
+
+    def __init__(
+        self,
+        start_k: float,
+        end_k: float,
+        duration: float = 1.0,
+        brightness: float = 1.0,
+        ease: Callable[[float], float] = Ease.in_out_sine,
+    ) -> None:
+        self.start_k = float(start_k)
+        self.end_k = float(end_k)
+        self.duration = float(duration)
+        self.brightness = float(brightness)
+        self.ease_fn = ease
+
+    def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
+        progress = max(0.0, min(1.0, t / self.duration)) if self.duration > 0 else 1.0
+        eased = self.ease_fn(progress)
+        k = self.start_k + (self.end_k - self.start_k) * eased
+        ww, cw = kelvin_to_ww_cw(k, self.brightness)
+        return Patch(channels={"ww": ww, "cw": cw, "w": cw})

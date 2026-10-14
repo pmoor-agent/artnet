@@ -212,6 +212,37 @@ class TestLightshow(unittest.TestCase):
         inf_loop = fade * inf
         self.assertEqual(inf_loop.duration, inf)
 
+    def test_cct_and_color_temperature(self) -> None:
+        from lightshow import CCT, FadeCCT, kelvin_to_ww_cw
+        from my_rig import STROBE_BAR, create_rig
+
+        # 3200K (Warm White only)
+        ww_3200, cw_3200 = kelvin_to_ww_cw(3200)
+        self.assertAlmostEqual(ww_3200, 1.0, places=3)
+        self.assertAlmostEqual(cw_3200, 0.0, places=3)
+
+        # 6600K (Cold White only)
+        ww_6600, cw_6600 = kelvin_to_ww_cw(6600)
+        self.assertAlmostEqual(ww_6600, 0.0, places=3)
+        self.assertAlmostEqual(cw_6600, 1.0, places=3)
+
+        # Mid temperature (4500K)
+        ww_4500, cw_4500 = kelvin_to_ww_cw(4500)
+        self.assertGreater(ww_4500, 0.3)
+        self.assertGreater(cw_4500, 0.3)
+        self.assertAlmostEqual(ww_4500 + cw_4500, 1.0, places=3)
+
+        # Render on STROBE_BAR via Rig
+        rig = create_rig(dry_run=True)
+        dmx_warm = rig.render_dmx({STROBE_BAR: CCT(3200, duration=1.0)}, t=0.5)
+        # Seg 1 WW (ch 35 -> index 34) is 255, CW (ch 36 -> index 35) is 0
+        self.assertEqual(dmx_warm[34], 255)
+        self.assertEqual(dmx_warm[35], 0)
+
+        dmx_cold = rig.render_dmx({STROBE_BAR: CCT(6600, duration=1.0)}, t=0.5)
+        self.assertEqual(dmx_cold[34], 0)
+        self.assertEqual(dmx_cold[35], 255)
+
 
 if __name__ == "__main__":
     unittest.main()
