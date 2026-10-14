@@ -549,6 +549,10 @@ class Wait(Clip):
         return Patch()
 
 
+# Alias Pause to Wait for semantic clarity
+Pause = Wait
+
+
 class Hold(Clip):
     """Hold a constant RGB `color` and/or any named scalar channels (`w=...`, `dimmer=...`, `strobe=...`, `value=...`)."""
 

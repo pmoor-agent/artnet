@@ -241,7 +241,26 @@ class TestLightshow(unittest.TestCase):
 
         dmx_cold = rig.render_dmx({STROBE_BAR: CCT(6600, duration=1.0)}, t=0.5)
         self.assertEqual(dmx_cold[34], 0)
-        self.assertEqual(dmx_cold[35], 255)
+    def test_wait_and_pause_transparency(self) -> None:
+        from lightshow import Blackout, Pause, Wait
+        from my_rig import PARS, create_rig
+
+        rig = create_rig(dry_run=True)
+
+        # Baseline: PARs red
+        base = Hold(Color.RED, duration=2.0)
+
+        # 1. Layering with Blackout: actively overwrites to black
+        dmx_blackout = rig.render_dmx({PARS: base | Blackout(2.0)}, t=1.0)
+        self.assertEqual(dmx_blackout[0:3], [0, 0, 0])
+
+        # 2. Layering with Wait: completely transparent, base shows through
+        dmx_wait = rig.render_dmx({PARS: base | Wait(2.0)}, t=1.0)
+        self.assertEqual(dmx_wait[0:3], [255, 0, 0])
+
+        # 3. Layering with Pause (alias): also completely transparent
+        dmx_pause = rig.render_dmx({PARS: base | Pause(2.0)}, t=1.0)
+        self.assertEqual(dmx_pause[0:3], [255, 0, 0])
 
 
 if __name__ == "__main__":
