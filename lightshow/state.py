@@ -44,6 +44,19 @@ class Color:
             b=self.b + (other.b - self.b) * t,
         )
 
+    def to_hsv(self) -> tuple[float, float, float]:
+        """Convert sRGB components to (hue [0..1], saturation [0..1], value [0..1])."""
+        return colorsys.rgb_to_hsv(self.r, self.g, self.b)
+
+    def shift_hsv(self, dh: float = 0.0, ds: float = 0.0, dv: float = 0.0) -> Color:
+        """Adjust color in HSV space (hue wraps around [0..1], saturation and value clamped)."""
+        h, s, v = colorsys.rgb_to_hsv(self.r, self.g, self.b)
+        new_h = (h + dh) % 1.0
+        new_s = max(0.0, min(1.0, s + ds))
+        new_v = max(0.0, min(1.0, v + dv))
+        r, g, b = colorsys.hsv_to_rgb(new_h, new_s, new_v)
+        return Color(r, g, b)
+
     def __mul__(self, factor: float) -> Color:
         return Color(
             r=max(0.0, min(1.0, self.r * factor)),
@@ -60,6 +73,75 @@ class Color:
             g=min(1.0, self.g + other.g),
             b=min(1.0, self.b + other.b),
         )
+
+    def hold(self, duration: float = float("inf")):
+        """Turn this static Color into a continuous Hold clip."""
+        from .clips import Hold
+        return Hold(self, duration=duration)
+
+    def flicker(
+        self,
+        depth: float = 0.5,
+        speed: float = 12.0,
+        *,
+        low: Optional[float] = None,
+        high: float = 1.0,
+        octaves: int = 3,
+        seed: int = 101,
+        decorrelate: float = 13.37,
+        duration: float = float("inf"),
+    ):
+        """Create a continuous flickering flame clip from this Color."""
+        from .clips import Flicker, Hold
+        return Flicker(
+            Hold(self, duration=duration),
+            depth=depth,
+            speed=speed,
+            low=low,
+            high=high,
+            octaves=octaves,
+            seed=seed,
+            decorrelate=decorrelate,
+        )
+
+    def jitter_hue(
+        self,
+        amount: float = 0.08,
+        speed: float = 3.0,
+        *,
+        octaves: int = 2,
+        seed: int = 202,
+        decorrelate: float = 11.23,
+        duration: float = float("inf"),
+    ):
+        """Create a continuous organic hue-jitter clip from this Color."""
+        from .clips import Hold, HueShift
+        return HueShift(
+            Hold(self, duration=duration),
+            amount=amount,
+            speed=speed,
+            octaves=octaves,
+            seed=seed,
+            decorrelate=decorrelate,
+        )
+
+    def __or__(self, other):
+        from .clips import Clip, Hold
+        if isinstance(other, Clip):
+            return Hold(self) | other
+        return NotImplemented
+
+    def __rshift__(self, other):
+        from .clips import Clip, Hold
+        if isinstance(other, Clip):
+            return Hold(self) >> other
+        return NotImplemented
+
+    def __and__(self, other):
+        from .clips import Clip, Hold
+        if isinstance(other, Clip):
+            return Hold(self) & other
+        return NotImplemented
 
 
 # Standard RGB color palette constants
@@ -90,6 +172,8 @@ class Patch:
     """
     color: Optional[Color] = None
     channels: Mapping[str, float] = field(default_factory=dict)
+    hsv_offset: Optional[tuple[float, float, float]] = None
+    dimmer_scale: float = 1.0
 
     @classmethod
     def from_color(cls, color: Color, **channels: float) -> Patch:
@@ -98,6 +182,16 @@ class Patch:
     @classmethod
     def from_channel(cls, name: str, value: float) -> Patch:
         return cls(color=None, channels={name: value})
+
+    @classmethod
+    def from_hsv_offset(
+        cls,
+        dh: float = 0.0,
+        ds: float = 0.0,
+        dv: float = 0.0,
+        dimmer_scale: float = 1.0,
+    ) -> Patch:
+        return cls(color=None, channels={}, hsv_offset=(dh, ds, dv), dimmer_scale=dimmer_scale)
 
     def get(self, name: str, default: Optional[float] = None) -> Optional[float]:
         """Look up a named scalar channel (falling back to 'value' or `color.max_component` if appropriate)."""
@@ -108,12 +202,52 @@ class Patch:
         return default
 
     def merge(self, top: Patch) -> Patch:
-        """Override this patch's fields with non-None fields from `top` (`a | b`)."""
+        """Override this patch's fields with non-None fields from `top` (`a | b`), applying any relative offsets."""
+        base_color = top.color if top.color is not None else self.color
+
+        if base_color is not None:
+            # If self had pending relative offsets and top supplied the base color:
+            if top.color is not None and self.hsv_offset is not None:
+                base_color = base_color.shift_hsv(*self.hsv_offset)
+            if top.color is not None and self.dimmer_scale != 1.0:
+                base_color = base_color * self.dimmer_scale
+            # Apply top's relative offsets to the base color:
+            if top.hsv_offset is not None:
+                base_color = base_color.shift_hsv(*top.hsv_offset)
+            if top.dimmer_scale != 1.0:
+                base_color = base_color * top.dimmer_scale
+
         merged_channels = dict(self.channels)
         merged_channels.update(top.channels)
+
+        if top.dimmer_scale != 1.0 and "dimmer" in merged_channels:
+            merged_channels["dimmer"] = max(0.0, min(1.0, merged_channels["dimmer"] * top.dimmer_scale))
+
+        # If base_color is still None, accumulate relative offsets from both self and top:
+        merged_hsv = None
+        merged_dimmer = 1.0
+        if base_color is None:
+            dh, ds, dv = 0.0, 0.0, 0.0
+            has_hsv = False
+            if self.hsv_offset is not None:
+                has_hsv = True
+                dh += self.hsv_offset[0]
+                ds += self.hsv_offset[1]
+                dv += self.hsv_offset[2]
+            if top.hsv_offset is not None:
+                has_hsv = True
+                dh += top.hsv_offset[0]
+                ds += top.hsv_offset[1]
+                dv += top.hsv_offset[2]
+            if has_hsv:
+                merged_hsv = (dh, ds, dv)
+            merged_dimmer = self.dimmer_scale * top.dimmer_scale
+
         return Patch(
-            color=top.color if top.color is not None else self.color,
+            color=base_color,
             channels=merged_channels,
+            hsv_offset=merged_hsv,
+            dimmer_scale=merged_dimmer,
         )
 
     def add(self, other: Patch) -> Patch:

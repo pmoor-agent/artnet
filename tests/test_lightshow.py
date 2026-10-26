@@ -11,12 +11,19 @@ from lightshow import (
     Color,
     Fade,
     FixtureGroup,
+    Flicker,
+    Gradient,
     Hold,
+    HueShift,
+    Noise,
+    Patch,
     Rig,
     Strobe,
     build_artdmx_packet,
     ch,
     dim,
+    fbm_noise1d,
+    smooth_noise1d,
 )
 from my_rig import (
     PAR_DIMMERS,
@@ -339,6 +346,118 @@ class TestLightshow(unittest.TestCase):
             _ = base_clip[0]  # Integer indexing not allowed on temporal clip
         with self.assertRaises(TypeError):
             _ = scene[0]  # Integer indexing not allowed on temporal scene
+
+    def test_noise_and_fbm_determinism_and_continuity(self) -> None:
+        """Verify smooth_noise1d and fbm_noise1d properties."""
+        # 1. Determinism
+        n1 = smooth_noise1d(3.1415, seed=42)
+        n2 = smooth_noise1d(3.1415, seed=42)
+        self.assertEqual(n1, n2)
+
+        # 2. Output bounds [0.0, 1.0]
+        for x in [0.0, 0.5, 1.0, 2.7, 10.99, -5.2]:
+            val = fbm_noise1d(x, octaves=3, seed=123)
+            self.assertGreaterEqual(val, 0.0)
+            self.assertLessEqual(val, 1.0)
+
+        # 3. Continuity (small dx yields small dy)
+        x0 = 5.25
+        y0 = fbm_noise1d(x0, octaves=3, seed=99)
+        y1 = fbm_noise1d(x0 + 0.001, octaves=3, seed=99)
+        self.assertLess(abs(y1 - y0), 0.01)
+
+    def test_color_hsv_math_and_relative_shifting(self) -> None:
+        """Verify Color.to_hsv() and Color.shift_hsv(dh, ds, dv)."""
+        # Red is (0.0, 1.0, 1.0) in HSV
+        red = Color.RED
+        h, s, v = red.to_hsv()
+        self.assertAlmostEqual(h, 0.0, places=4)
+        self.assertAlmostEqual(s, 1.0, places=4)
+        self.assertAlmostEqual(v, 1.0, places=4)
+
+        # Shifting red by +0.08 yields orange (r=1.0, g>0, b=0)
+        orange = red.shift_hsv(dh=0.08)
+        self.assertAlmostEqual(orange.r, 1.0, places=4)
+        self.assertGreater(orange.g, 0.3)
+        self.assertAlmostEqual(orange.b, 0.0, places=4)
+
+        # Shifting red by -0.05 wraps around to crimson (r=1.0, g=0, b>0)
+        crimson = red.shift_hsv(dh=-0.05)
+        self.assertAlmostEqual(crimson.r, 1.0, places=4)
+        self.assertAlmostEqual(crimson.g, 0.0, places=4)
+        self.assertGreater(crimson.b, 0.1)
+
+        # Saturation and value clamping
+        white_desat = red.shift_hsv(ds=-1.0)
+        self.assertAlmostEqual(white_desat.r, 1.0, places=4)
+        self.assertAlmostEqual(white_desat.g, 1.0, places=4)
+        self.assertAlmostEqual(white_desat.b, 1.0, places=4)
+
+    def test_flicker_and_fixture_decorrelation(self) -> None:
+        """Verify Flicker modulation and per-fixture decorrelation."""
+        base = Hold(Color.RED)
+        flicker = base.flicker(depth=0.5, speed=12.0, low=0.4, high=1.0, seed=101)
+
+        # 1. Output stays within [low, high]
+        p0 = flicker.eval(0.5, fixture=0, total_fixtures=4)
+        self.assertIsNotNone(p0.color)
+        self.assertGreaterEqual(p0.color.r, 0.39)
+        self.assertLessEqual(p0.color.r, 1.01)
+        self.assertEqual(p0.color.g, 0.0)
+        self.assertEqual(p0.color.b, 0.0)
+
+        # 2. Per-fixture decorrelation: fixture 0 and fixture 1 have different intensities
+        p1 = flicker.eval(0.5, fixture=1, total_fixtures=4)
+        self.assertNotEqual(p0.color.r, p1.color.r)
+
+        # 3. Layering syntax: base | Flicker(...)
+        layered = base | Flicker(depth=0.5, speed=12.0, low=0.4, high=1.0, seed=101)
+        p_lay = layered.eval(0.5, fixture=0, total_fixtures=4)
+        self.assertAlmostEqual(p0.color.r, p_lay.color.r, places=4)
+
+    def test_hueshift_and_jitter_hue(self) -> None:
+        """Verify HueShift relative hue rotation and jitter."""
+        # 1. Static hue shift
+        shifted = Hold(Color.RED).shift_hsv(dh=0.08)
+        p = shifted.eval(0.0)
+        self.assertAlmostEqual(p.color.r, 1.0, places=4)
+        self.assertGreater(p.color.g, 0.3)
+
+        # 2. Continuous organic hue jitter
+        jitter = Hold(Color.RED).jitter_hue(amount=0.08, speed=3.0)
+        p_j0 = jitter.eval(0.2, fixture=0)
+        p_j1 = jitter.eval(0.2, fixture=1)
+        self.assertNotEqual(p_j0.color.g, p_j1.color.g)
+
+        # 3. Layering syntax: base | HueShift(dh=0.08)
+        layered = Hold(Color.RED) | HueShift(dh=0.08)
+        p_layer = layered.eval(0.0)
+        self.assertAlmostEqual(p.color.r, p_layer.color.r, places=4)
+        self.assertAlmostEqual(p.color.g, p_layer.color.g, places=4)
+
+    def test_relative_composition_and_scene_modifiers(self) -> None:
+        """Verify chaining relative effects and scene-level modifiers."""
+        # 1. Chained modifiers on clip: flicker + hue jitter
+        fx_clip = Hold(Color.RED).flicker(depth=0.5, speed=10.0).jitter_hue(amount=0.06, speed=3.0)
+        p = fx_clip.eval(0.3, fixture=0)
+        self.assertIsNotNone(p.color)
+        self.assertGreater(p.color.r, 0.0)
+
+        # 2. Relative FX combined first then applied to base: (Flicker | HueShift)
+        rel_fx = Flicker(depth=0.5, speed=10.0) | HueShift(amount=0.06, speed=3.0)
+        p_rel = (Hold(Color.RED) | rel_fx).eval(0.3, fixture=0)
+        self.assertIsNotNone(p_rel.color)
+        self.assertGreater(p_rel.color.r, 0.0)
+
+        # 3. Scene-level flicker and hue jitter on multi-fixture group
+        scene = PARS(Hold(Color.RED))
+        scene_fx = scene.flicker(depth=0.5).jitter_hue(amount=0.06)
+        dmx_fx = scene_fx.eval_canvas(0.5).to_dmx_list(min_size=24)
+
+        # PAR 1 (ch 1..3) and PAR 2 (ch 7..9) have non-zero red, decorrelated values
+        self.assertGreater(dmx_fx[0], 0)
+        self.assertGreater(dmx_fx[6], 0)
+        self.assertNotEqual(dmx_fx[0], dmx_fx[6])
 
 
 if __name__ == "__main__":

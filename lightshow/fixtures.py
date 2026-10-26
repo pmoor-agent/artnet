@@ -471,6 +471,43 @@ class Scene:
     def scale(self, factor: float) -> ScaleScene:
         return ScaleScene(self, factor)
 
+    def flicker(
+        self,
+        depth: float = 0.5,
+        speed: float = 12.0,
+        *,
+        low: Optional[float] = None,
+        high: float = 1.0,
+        octaves: int = 3,
+        seed: int = 101,
+        decorrelate: float = 13.37,
+    ) -> Scene:
+        """Modulate all fixture groups in this scene with organic flicker."""
+        raise NotImplementedError
+
+    def jitter_hue(
+        self,
+        amount: float = 0.08,
+        speed: float = 3.0,
+        *,
+        octaves: int = 2,
+        seed: int = 202,
+        decorrelate: float = 11.23,
+    ) -> Scene:
+        """Smoothly jitter the hue of all RGB fixtures in this scene with organic noise."""
+        raise NotImplementedError
+
+    def shift_hsv(
+        self,
+        dh: Union[float, Clip] = 0.0,
+        ds: float = 0.0,
+        dv: float = 0.0,
+        *,
+        dimmer_scale: float = 1.0,
+    ) -> Scene:
+        """Relative HSV shift for all RGB fixtures in this scene."""
+        raise NotImplementedError
+
 
 class BoundScene(Scene):
     """A `Clip` bound to a specific `FixtureGroup` (`group(clip)`)."""
@@ -490,6 +527,68 @@ class BoundScene(Scene):
 
     def groups(self) -> list[FixtureGroup]:
         return [self.group]
+
+    def flicker(
+        self,
+        depth: float = 0.5,
+        speed: float = 12.0,
+        *,
+        low: Optional[float] = None,
+        high: float = 1.0,
+        octaves: int = 3,
+        seed: int = 101,
+        decorrelate: float = 13.37,
+    ) -> Scene:
+        return BoundScene(
+            self.group,
+            self.clip.flicker(
+                depth=depth,
+                speed=speed,
+                low=low,
+                high=high,
+                octaves=octaves,
+                seed=seed,
+                decorrelate=decorrelate,
+            ),
+        )
+
+    def jitter_hue(
+        self,
+        amount: float = 0.08,
+        speed: float = 3.0,
+        *,
+        octaves: int = 2,
+        seed: int = 202,
+        decorrelate: float = 11.23,
+    ) -> Scene:
+        return BoundScene(
+            self.group,
+            self.clip.jitter_hue(
+                amount=amount,
+                speed=speed,
+                octaves=octaves,
+                seed=seed,
+                decorrelate=decorrelate,
+            ),
+        )
+
+    def shift_hsv(
+        self,
+        dh: Union[float, Clip] = 0.0,
+        ds: float = 0.0,
+        dv: float = 0.0,
+        *,
+        dimmer_scale: float = 1.0,
+    ) -> Scene:
+        return BoundScene(
+            self.group,
+            self.clip.shift_hsv(
+                dh=dh,
+                ds=ds,
+                dv=dv,
+                dimmer_scale=dimmer_scale,
+            ),
+        )
 
 
 class LayerScene(Scene):
@@ -514,6 +613,27 @@ class LayerScene(Scene):
         for g in self.bottom.groups() + self.top.groups():
             seen.setdefault(g.name, g)
         return list(seen.values())
+
+    def flicker(self, depth: float = 0.5, speed: float = 12.0, **kwargs) -> Scene:
+        return LayerScene(
+            self.bottom.flicker(depth=depth, speed=speed, **kwargs),
+            self.top.flicker(depth=depth, speed=speed, **kwargs),
+            mode=self.mode,
+        )
+
+    def jitter_hue(self, amount: float = 0.08, speed: float = 3.0, **kwargs) -> Scene:
+        return LayerScene(
+            self.bottom.jitter_hue(amount=amount, speed=speed, **kwargs),
+            self.top.jitter_hue(amount=amount, speed=speed, **kwargs),
+            mode=self.mode,
+        )
+
+    def shift_hsv(self, dh: Union[float, Clip] = 0.0, ds: float = 0.0, dv: float = 0.0, **kwargs) -> Scene:
+        return LayerScene(
+            self.bottom.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs),
+            self.top.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs),
+            mode=self.mode,
+        )
 
 
 class SequenceScene(Scene):
@@ -547,6 +667,15 @@ class SequenceScene(Scene):
                 seen.setdefault(g.name, g)
         return list(seen.values())
 
+    def flicker(self, depth: float = 0.5, speed: float = 12.0, **kwargs) -> Scene:
+        return SequenceScene(*(s.flicker(depth=depth, speed=speed, **kwargs) for s in self.scenes))
+
+    def jitter_hue(self, amount: float = 0.08, speed: float = 3.0, **kwargs) -> Scene:
+        return SequenceScene(*(s.jitter_hue(amount=amount, speed=speed, **kwargs) for s in self.scenes))
+
+    def shift_hsv(self, dh: Union[float, Clip] = 0.0, ds: float = 0.0, dv: float = 0.0, **kwargs) -> Scene:
+        return SequenceScene(*(s.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs) for s in self.scenes))
+
 
 class RepeatScene(Scene):
     """Loops a finite `Scene` `count` times (`scene * n` or `scene * inf`)."""
@@ -568,6 +697,15 @@ class RepeatScene(Scene):
     def groups(self) -> list[FixtureGroup]:
         return self.child.groups()
 
+    def flicker(self, depth: float = 0.5, speed: float = 12.0, **kwargs) -> Scene:
+        return RepeatScene(self.child.flicker(depth=depth, speed=speed, **kwargs), count=self.count)
+
+    def jitter_hue(self, amount: float = 0.08, speed: float = 3.0, **kwargs) -> Scene:
+        return RepeatScene(self.child.jitter_hue(amount=amount, speed=speed, **kwargs), count=self.count)
+
+    def shift_hsv(self, dh: Union[float, Clip] = 0.0, ds: float = 0.0, dv: float = 0.0, **kwargs) -> Scene:
+        return RepeatScene(self.child.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs), count=self.count)
+
 
 class TimeScaleScene(Scene):
     """Stretches or compresses a finite `Scene` to `target_duration` (`scene @ seconds`)."""
@@ -585,6 +723,15 @@ class TimeScaleScene(Scene):
     def groups(self) -> list[FixtureGroup]:
         return self.child.groups()
 
+    def flicker(self, depth: float = 0.5, speed: float = 12.0, **kwargs) -> Scene:
+        return TimeScaleScene(self.child.flicker(depth=depth, speed=speed, **kwargs), target_duration=self.duration)
+
+    def jitter_hue(self, amount: float = 0.08, speed: float = 3.0, **kwargs) -> Scene:
+        return TimeScaleScene(self.child.jitter_hue(amount=amount, speed=speed, **kwargs), target_duration=self.duration)
+
+    def shift_hsv(self, dh: Union[float, Clip] = 0.0, ds: float = 0.0, dv: float = 0.0, **kwargs) -> Scene:
+        return TimeScaleScene(self.child.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs), target_duration=self.duration)
+
 
 class ReverseScene(Scene):
     """Reverses time for a finite `Scene` (`~scene`)."""
@@ -601,6 +748,15 @@ class ReverseScene(Scene):
 
     def groups(self) -> list[FixtureGroup]:
         return self.child.groups()
+
+    def flicker(self, depth: float = 0.5, speed: float = 12.0, **kwargs) -> Scene:
+        return ReverseScene(self.child.flicker(depth=depth, speed=speed, **kwargs))
+
+    def jitter_hue(self, amount: float = 0.08, speed: float = 3.0, **kwargs) -> Scene:
+        return ReverseScene(self.child.jitter_hue(amount=amount, speed=speed, **kwargs))
+
+    def shift_hsv(self, dh: Union[float, Clip] = 0.0, ds: float = 0.0, dv: float = 0.0, **kwargs) -> Scene:
+        return ReverseScene(self.child.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs))
 
 
 class SliceScene(Scene):
@@ -638,6 +794,15 @@ class SliceScene(Scene):
     def groups(self) -> list[FixtureGroup]:
         return self.child.groups()
 
+    def flicker(self, depth: float = 0.5, speed: float = 12.0, **kwargs) -> Scene:
+        return SliceScene(self.child.flicker(depth=depth, speed=speed, **kwargs), start=self.start, stop=self.stop, step=self.step)
+
+    def jitter_hue(self, amount: float = 0.08, speed: float = 3.0, **kwargs) -> Scene:
+        return SliceScene(self.child.jitter_hue(amount=amount, speed=speed, **kwargs), start=self.start, stop=self.stop, step=self.step)
+
+    def shift_hsv(self, dh: Union[float, Clip] = 0.0, ds: float = 0.0, dv: float = 0.0, **kwargs) -> Scene:
+        return SliceScene(self.child.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs), start=self.start, stop=self.stop, step=self.step)
+
 
 class ScaleScene(Scene):
     """Scales all active channel values in `child` by `factor` (`dim(factor, scene)`)."""
@@ -652,3 +817,12 @@ class ScaleScene(Scene):
 
     def groups(self) -> list[FixtureGroup]:
         return self.child.groups()
+
+    def flicker(self, depth: float = 0.5, speed: float = 12.0, **kwargs) -> Scene:
+        return ScaleScene(self.child.flicker(depth=depth, speed=speed, **kwargs), factor=self.factor)
+
+    def jitter_hue(self, amount: float = 0.08, speed: float = 3.0, **kwargs) -> Scene:
+        return ScaleScene(self.child.jitter_hue(amount=amount, speed=speed, **kwargs), factor=self.factor)
+
+    def shift_hsv(self, dh: Union[float, Clip] = 0.0, ds: float = 0.0, dv: float = 0.0, **kwargs) -> Scene:
+        return ScaleScene(self.child.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs), factor=self.factor)

@@ -291,7 +291,77 @@ red_strobe = Hold(Color.RED, strobe=0.85, duration=0.5)
 
 ---
 
-## 7. Putting It All Together: A Multi-Layer Mini Lightshow
+## 7. Organic Noise, Flame Flicker & Relative HSV Effects
+
+For realistic organic atmospheres—like Halloween torches, candle flickers, campfires, or subtle color-temperature drifts—`lightshow` provides continuous, resolution-independent fractal noise and relative color modifiers.
+
+### Continuous Deterministic Noise (`fbm_noise1d`, `smooth_noise1d`, `Noise`)
+
+Traditional lighting code often calls `random.random()`, which produces erratic frame jumps that look glitchy when frame rates vary. `lightshow` uses **continuous 1D fractal Brownian motion (fBm)**:
+- Evaluated as a smooth mathematical function $f(t) \in [0.0, 1.0]$.
+- Interpolated with $C^2$-continuous quintic Hermite splines.
+- **Fixture Decorrelation**: Each fixture receives an automatic spatial phase offset (`fixture_index * 13.37s`), ensuring every candle or torch flickers with its own organic rhythm while remaining 100% deterministic and repeatable.
+
+```python
+# Generic scalar noise channel (e.g. continuous wandering dimmer):
+shimmer = ch("dimmer", Noise(speed=4.0, min_val=0.3, max_val=1.0))
+```
+
+### Organic Flame Flicker (`Flicker` / `.flicker()`)
+
+`Flicker` modulates fixture brightness with the characteristic profile of an organic flame: high baseline brightness with rapid micro-shivers and intermittent dips.
+
+You can apply it either via fluent chaining or layer syntax:
+
+```python
+# Fluent chaining:
+torch = base_clip.flicker(depth=0.55, speed=11.0, low=0.25)
+
+# Or as a composable modifier layer:
+torch = base_clip | Flicker(depth=0.55, speed=11.0)
+```
+
+### Relative Color Effects in HSV Space (`HueShift` / `.jitter_hue()` / `.shift_hsv()`)
+
+Often you want to preserve the underlying base color or gradient wash, but subtly rotate its hue or adjust saturation and brightness on a secondary layer.
+
+- **`Color.to_hsv()` & `Color.shift_hsv(dh, ds, dv)`**: Shifts colors in HSV space. Hue $h \in [0.0, 1.0)$ wraps seamlessly around the color circle:
+  - Shifting Red ($h=0.0$) by $+0.08$ produces fiery Pumpkin Orange.
+  - Shifting Red ($h=0.0$) by $-0.05$ produces eerie Blood Crimson.
+- **`.jitter_hue(amount, speed)`**: Continuously rotates hue back and forth using smooth organic noise.
+- **`.shift_hsv(dh, ds, dv)`**: Applies static or dynamic offsets in HSV space.
+
+### Example 6: Halloween Torch Flicker with Hue Jitter & Lightning
+
+Here, an ominous red/ember wash is spread across the 8 PARs, modulated with independent flame flicker and subtle hue jitter, and interrupted by a cold lightning strike at the 3-second mark:
+
+```python
+# 1. Base: Deep ember and blood red gradient wash, phase spread across fixtures
+base_wash = Gradient(
+    [
+        Color(0.85, 0.00, 0.00),  # Blood Red
+        Color(1.00, 0.28, 0.00),  # Pumpkin Ember Orange
+        Color(0.45, 0.00, 0.05),  # Dark Crimson
+        Color(0.90, 0.15, 0.00),  # Molten Lava
+        Color(0.85, 0.00, 0.00),  # Loop return
+    ],
+    duration=4.0,
+).spread()
+
+# 2. Modulate with organic flame flicker (11 Hz) and continuous hue jitter (3.5 Hz)
+flicker_wash = base_wash.flicker(depth=0.55, speed=11.0, low=0.25).jitter_hue(amount=0.07, speed=3.5)
+
+# 3. Occasional eerie cold lightning burst at t=3.0s
+lightning = Wait(3.0) >> (Hold(Color.WHITE, strobe=0.9, duration=0.25).on(2, 3, 4, 5)) >> Wait(0.75)
+
+halloween_show = PARS(flicker_wash) + PARS(lightning)
+```
+
+![Halloween Torch & Candle Flicker](./images/06_halloween_flicker.gif)
+
+---
+
+## 8. Putting It All Together: A Multi-Layer Mini Lightshow
 
 This example combines:
 1. **Layer 1 (Base)**: An ambient, moving 4-color gradient spread across all 8 PARs.
@@ -327,7 +397,7 @@ mini_show = PARS(
 
 ---
 
-## 8. Jupyter Notebook & Live Streaming
+## 9. Jupyter Notebook & Live Streaming
 
 To use `lightshow` interactively in a Jupyter notebook without touching raw UDP sockets:
 
@@ -360,15 +430,16 @@ stop_stream()
 
 ---
 
-## 9. Quick Reference Cheat Sheet
+## 10. Quick Reference Cheat Sheet
 
 ### Operators on `Clip` and `Scene`
 
 | Expression | Name | Description |
 | :--- | :--- | :--- |
 | `A >> B` | Sequence | Play `A`, followed immediately by `B`. |
-| `A \| B` | Layer | Play `A` and `B` simultaneously (LTP override). |
-| `A ^ B` | Additive Blend | Layer with additive RGB photon mixing. |
+| `A \| B` | Layer / Override | Play `A` and `B` simultaneously (LTP override / relative offsets). |
+| `A + B` | Additive Blend | Layer with additive RGB photon mixing. |
+| `A & B` | Multiply / Mask | Scale `A` brightness or channels by scalar envelope `B`. |
 | `A * n` | Repeat | Loop `A` for $n$ cycles (use `n = inf` for infinite loop). |
 | `A[start:stop]` | Time Slice (Cut) | Extract sub-range $[t_{\text{start}}, t_{\text{stop}}]$ from clip or scene. |
 | `A @ dur` | Time Scale | Rescale playback so total duration equals `dur` seconds. |
@@ -390,10 +461,13 @@ stop_stream()
 | `Chase` | `color, step_duration=0.1, tail=1.0, background=Color.BLACK` | Stepping marquee chase. |
 | `Wait` | `duration` | Non-destructive pause. |
 | `Blackout` | `duration=inf` | Forces all channels to 0. |
+| `Noise` | `speed=1.0, min_val=0.0, max_val=1.0, octaves=3` | Continuous 1D fractal Brownian motion. |
+| `Flicker` | `depth=0.5, speed=12.0, low=None, high=1.0` | Organic flame / candle intensity flicker. |
+| `HueShift` | `dh=0.0, ds=0.0, dv=0.0, amount=0.0, speed=3.0` | Relative HSV color rotation and noise jitter. |
 | `SineLFO` | `freq=1.0, min_val=0.0, max_val=1.0` | Sinusoidal value oscillator. |
 | `DimmerLFO` | `freq=1.0, min_val=0.0, max_val=1.0` | Sinusoidal dimmer modulation. |
 
-### Clip Modifiers & Methods
+### Clip & Scene Modifiers & Methods
 
 | Method | Description |
 | :--- | :--- |
@@ -401,6 +475,9 @@ stop_stream()
 | `clip.spread()` | Distribute phase across all fixtures in the group evenly. |
 | `clip.stagger(delay)` | Shift start time of each successive fixture by `delay` seconds. |
 | `clip.pingpong()` | Play clip forward, then immediately backward (`clip >> ~clip`). |
+| `clip.flicker(depth, speed)` | Modulate with organic flame/candle flicker. Available on `Clip` and `Scene`. |
+| `clip.jitter_hue(amount, speed)` | Jitter hue smoothly in HSV space with organic noise. Available on `Clip` and `Scene`. |
+| `clip.shift_hsv(dh, ds, dv)` | Shift hue, saturation, and value relative to base color. Available on `Clip` and `Scene`. |
 | `clip.reverse()` | Invert playback direction (equivalent to `~clip`). |
 | `clip.mirror()` | Symmetrically reflect animation from center outward. |
 | `clip.loop(n=inf)` | Repeat clip $n$ times (default infinite). |

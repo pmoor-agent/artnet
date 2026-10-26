@@ -15,11 +15,18 @@ Traditional lighting control often suffers from imperative spaghetti code: manua
   - `~` for time reversal (`.pingpong()`)
 - **Spatial Distribution & Transforms**: Distribute phase waves across fixtures with `.spread()`, create marquee sweeps with `.pingpong()`, and symmetrically mirror across the stage with `.mirror()`.
 - **Physical Fixture Profiles & Visualizer**: Zero-dependency 2D SVG stage visualizer (`EurolitePartySpot`, `EuroliteBCL40Bar`) with authentic concentric LED rings, bi-color SMD diode tracks, and Nyquist-safe strobe rendering.
+- **Organic Noise & Flame Flicker**: Continuous 1D fractal Brownian motion (`fbm_noise1d`, `Noise`, `Flicker`) with per-fixture decorrelation for organic candle and torch flicker without discrete frame pops.
+- **Relative HSV Color Modulation**: Keep base colors/gradients intact while smoothly rotating hue or shifting saturation and brightness with `HueShift`, `.jitter_hue()`, and `.shift_hsv()`.
 - **Jupyter & Live Streaming**: Built-in interactive Jupyter scrubber widget and non-blocking background 40 Hz Art-Net streaming with live hot-reloading (`from lightshow.jupyter import *`).
 
 ---
 
 ## Visualizer Previews
+
+### Halloween Torch Flicker & Relative Hue Jitter
+Deep ember/blood-red gradient wash with independent per-fixture flame flicker, smooth organic hue jitter, and a cold lightning strike:
+
+![Halloween Torch Flicker](./docs/images/06_halloween_flicker.gif)
 
 ### Multi-Layer Composition
 An ambient moving gradient wave, rhythmic dimmer pulse, and synchronized strobe hits:

@@ -193,6 +193,65 @@ class Clip:
         """Dim/scale output intensity of this clip by `factor` in [0.0, 1.0]."""
         return ScaleClip(self, factor, attr=attr)
 
+    def flicker(
+        self,
+        depth: float = 0.5,
+        speed: float = 12.0,
+        *,
+        low: Optional[float] = None,
+        high: float = 1.0,
+        octaves: int = 3,
+        seed: int = 101,
+        decorrelate: float = 13.37,
+    ) -> Flicker:
+        """Modulate intensity with organic continuous noise (flame/torch flicker)."""
+        return Flicker(
+            self,
+            speed=speed,
+            depth=depth,
+            low=low,
+            high=high,
+            octaves=octaves,
+            seed=seed,
+            decorrelate=decorrelate,
+        )
+
+    def jitter_hue(
+        self,
+        amount: float = 0.08,
+        speed: float = 3.0,
+        *,
+        octaves: int = 2,
+        seed: int = 202,
+        decorrelate: float = 11.23,
+    ) -> HueShift:
+        """Smoothly jitter the hue around the base color with organic continuous noise."""
+        return HueShift(
+            self,
+            amount=amount,
+            speed=speed,
+            octaves=octaves,
+            seed=seed,
+            decorrelate=decorrelate,
+        )
+
+    def shift_hsv(
+        self,
+        dh: Union[float, Clip] = 0.0,
+        ds: float = 0.0,
+        dv: float = 0.0,
+        *,
+        dimmer_scale: float = 1.0,
+    ) -> HueShift:
+        """Offset hue, saturation, and/or value in HSV space."""
+        return HueShift(
+            self,
+            dh=dh,
+            ds=ds,
+            dv=dv,
+            dimmer_scale=dimmer_scale,
+        )
+
 
 def dim(factor: float, target, *, attr: Optional[str] = None):
     """Composable combinator that dims a `Clip` or a `Scene` by `factor` (e.g. `dim(0.3, strobe_anim)`).
@@ -920,3 +979,262 @@ class FadeCCT(Clip):
         k = self.start_k + (self.end_k - self.start_k) * eased
         ww, cw = kelvin_to_ww_cw(k, self.brightness)
         return Patch(channels={"ww": ww, "cw": cw, "w": cw})
+
+
+# =============================================================================
+# Pseudo-Random Noise, Flame Flicker & Relative HSV Modulators
+# =============================================================================
+
+
+def _hash1d(n: int, seed: int = 0) -> float:
+    """Deterministic integer hash returning float in [0.0, 1.0]."""
+    x = (int(n) ^ (int(seed) * 0x9E3779B9)) & 0xFFFFFFFF
+    x = ((x >> 16) ^ x) * 0x45D9F3B
+    x = ((x >> 16) ^ x) * 0x45D9F3B
+    x = (x >> 16) ^ x
+    return (x & 0xFFFFFFFF) / 4294967295.0
+
+
+def smooth_noise1d(x: float, seed: int = 0) -> float:
+    """Continuous 1D value noise with quintic Hermite interpolation, returning [0.0, 1.0]."""
+    i0 = math.floor(x)
+    i1 = i0 + 1
+    f = x - i0
+    # Ken Perlin's Improved quintic curve: 6t^5 - 15t^4 + 10t^3 (zero 1st & 2nd derivatives at knots)
+    u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0)
+    v0 = _hash1d(i0, seed)
+    v1 = _hash1d(i1, seed)
+    return v0 + (v1 - v0) * u
+
+
+def fbm_noise1d(
+    x: float,
+    octaves: int = 3,
+    seed: int = 0,
+    lacunarity: float = 2.0,
+    gain: float = 0.5,
+) -> float:
+    """Continuous 1D Fractal Brownian Motion (fBm) noise returning [0.0, 1.0].
+
+    Sum of `octaves` harmonics of `smooth_noise1d`, normalized to [0.0, 1.0].
+    """
+    val = 0.0
+    amp = 1.0
+    freq = 1.0
+    total_amp = 0.0
+    for k in range(max(1, int(octaves))):
+        val += amp * smooth_noise1d(x * freq, seed + k * 1013)
+        total_amp += amp
+        amp *= gain
+        freq *= lacunarity
+    return val / total_amp
+
+
+class Noise(Clip):
+    """Continuous 1D fractal Brownian motion (fBm) noise clip.
+
+    Evaluates to a normalized scalar in `[min_val, max_val]`, accessible
+    as a `'value'` channel in `Patch` or via `.sample(t, fixture)`.
+
+    Args:
+        speed: Frequency of noise changes (Hz/units per second).
+        min_val: Output minimum.
+        max_val: Output maximum.
+        octaves: Detail octaves for fractal noise (1 = smooth, 4 = chaotic).
+        seed: Deterministic integer seed.
+        decorrelate: Spatial offset per fixture index.
+        duration: Clip duration (default: inf).
+    """
+
+    def __init__(
+        self,
+        speed: float = 1.0,
+        min_val: float = 0.0,
+        max_val: float = 1.0,
+        *,
+        octaves: int = 3,
+        seed: int = 0,
+        decorrelate: float = 17.13,
+        duration: float = inf,
+    ) -> None:
+        self.speed = float(speed)
+        self.min_val = float(min_val)
+        self.max_val = float(max_val)
+        self.octaves = max(1, int(octaves))
+        self.seed = int(seed)
+        self.decorrelate = float(decorrelate)
+        self.duration = float(duration)
+
+    def sample(self, t: float, fixture: int = 0) -> float:
+        x = t * self.speed + fixture * self.decorrelate
+        n = fbm_noise1d(x, octaves=self.octaves, seed=self.seed)
+        return self.min_val + (self.max_val - self.min_val) * n
+
+    def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
+        val = self.sample(t, fixture)
+        return Patch.from_channel("value", val)
+
+
+class Flicker(Clip):
+    """Organic continuous pseudo-random intensity / flame flicker.
+
+    Can be used:
+      1. As a wrapper around another clip: `Flicker(base_clip, depth=0.5)` or `base_clip.flicker()`
+      2. As a standalone layer: `base_clip | Flicker(depth=0.5)`
+      3. For a dedicated channel: `ch("dimmer", Flicker(depth=0.5))`
+
+    Args:
+        child: Optional child clip to modulate.
+        speed: Frequency of flicker fluctuations (default: 12.0 Hz).
+        depth: Modulation depth in [0.0, 1.0] (0.5 means brightness dips by up to 50%).
+        low: Optional explicit minimum intensity floor (overrides `depth`).
+        high: Maximum intensity peak (default: 1.0).
+        octaves: Detail octaves for fractal noise (default: 3).
+        seed: Deterministic integer seed.
+        decorrelate: Phase offset per fixture so fixtures flicker independently (default: 13.37).
+        duration: Clip duration (defaults to child's duration or inf).
+    """
+
+    def __init__(
+        self,
+        child: Optional[Clip] = None,
+        *,
+        speed: float = 12.0,
+        depth: float = 0.5,
+        low: Optional[float] = None,
+        high: float = 1.0,
+        octaves: int = 3,
+        seed: int = 101,
+        decorrelate: float = 13.37,
+        duration: float = inf,
+    ) -> None:
+        self.child = child
+        self.speed = float(speed)
+        self.depth = float(depth)
+        self.high = float(high)
+        self.low = float(high * (1.0 - depth) if low is None else low)
+        self.octaves = max(1, int(octaves))
+        self.seed = int(seed)
+        self.decorrelate = float(decorrelate)
+        self.duration = child.duration if child is not None else float(duration)
+
+    def sample_factor(self, t: float, fixture: int = 0) -> float:
+        x = t * self.speed + fixture * self.decorrelate
+        n = fbm_noise1d(x, octaves=self.octaves, seed=self.seed)
+        return max(0.0, min(1.0, self.low + (self.high - self.low) * n))
+
+    def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
+        factor = self.sample_factor(t, fixture)
+        if self.child is not None:
+            child_patch = self.child.eval(t, fixture, total_fixtures)
+            new_color = (child_patch.color * factor) if child_patch.color is not None else None
+            new_channels = dict(child_patch.channels)
+            if "dimmer" in new_channels:
+                new_channels["dimmer"] = max(0.0, min(1.0, new_channels["dimmer"] * factor))
+            elif "value" in new_channels:
+                new_channels["value"] = max(0.0, min(1.0, new_channels["value"] * factor))
+            dimmer_scale = child_patch.dimmer_scale * factor if child_patch.color is None and not new_channels else 1.0
+            return Patch(
+                color=new_color,
+                channels=new_channels,
+                hsv_offset=child_patch.hsv_offset,
+                dimmer_scale=dimmer_scale,
+            )
+        else:
+            return Patch(
+                channels={"dimmer": factor, "value": factor},
+                dimmer_scale=factor,
+            )
+
+
+class HueShift(Clip):
+    """Relative HSV shift and hue jitter clip.
+
+    Can be used:
+      1. As a wrapper around another clip: `HueShift(base_clip, dh=0.1)` or `base_clip.jitter_hue()`
+      2. As a standalone layer: `base_clip | HueShift(dh=0.1)` or `base_clip | HueShift(amount=0.06, speed=3.0)`
+
+    Args:
+        child: Optional child clip to modulate.
+        dh: Static float hue delta or dynamic `Clip` (e.g. `Noise(...)`).
+        ds: Saturation delta in [-1.0, 1.0].
+        dv: Value/brightness delta in [-1.0, 1.0].
+        amount: If > 0, generates continuous pseudo-random hue jitter in `[-amount, +amount]`.
+        speed: Frequency of hue jitter (when `amount > 0`).
+        octaves: Detail octaves for hue jitter noise.
+        seed: Deterministic integer seed.
+        decorrelate: Spatial offset per fixture index for hue jitter.
+        dimmer_scale: Scaling factor for dimmer/brightness.
+        duration: Duration of this clip.
+    """
+
+    def __init__(
+        self,
+        child: Optional[Clip] = None,
+        *,
+        dh: Union[float, Clip] = 0.0,
+        ds: float = 0.0,
+        dv: float = 0.0,
+        amount: float = 0.0,
+        speed: float = 3.0,
+        octaves: int = 2,
+        seed: int = 202,
+        decorrelate: float = 11.23,
+        dimmer_scale: float = 1.0,
+        duration: float = inf,
+    ) -> None:
+        self.child = child
+        self.dh_input = dh
+        self.ds = float(ds)
+        self.dv = float(dv)
+        self.amount = float(amount)
+        self.speed = float(speed)
+        self.octaves = max(1, int(octaves))
+        self.seed = int(seed)
+        self.decorrelate = float(decorrelate)
+        self.dimmer_scale = float(dimmer_scale)
+
+        if child is not None:
+            self.duration = child.duration
+        elif isinstance(dh, Clip):
+            self.duration = dh.duration
+        else:
+            self.duration = float(duration)
+
+    def sample_dh(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> float:
+        if self.amount > 0.0:
+            x = t * self.speed + fixture * self.decorrelate
+            n = fbm_noise1d(x, octaves=self.octaves, seed=self.seed)
+            return (n - 0.5) * 2.0 * self.amount
+        if isinstance(self.dh_input, Clip):
+            p = self.dh_input.eval(t, fixture, total_fixtures)
+            return p.get("value", 0.0)
+        return float(self.dh_input)
+
+    def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
+        cur_dh = self.sample_dh(t, fixture, total_fixtures)
+        if self.child is not None:
+            child_patch = self.child.eval(t, fixture, total_fixtures)
+            if child_patch.color is not None:
+                new_color = child_patch.color.shift_hsv(cur_dh, self.ds, self.dv)
+                if self.dimmer_scale != 1.0:
+                    new_color = new_color * self.dimmer_scale
+                merged_channels = dict(child_patch.channels)
+                if self.dimmer_scale != 1.0 and "dimmer" in merged_channels:
+                    merged_channels["dimmer"] = max(0.0, min(1.0, merged_channels["dimmer"] * self.dimmer_scale))
+                return Patch(color=new_color, channels=merged_channels)
+            else:
+                prev_dh, prev_ds, prev_dv = child_patch.hsv_offset if child_patch.hsv_offset else (0.0, 0.0, 0.0)
+                return Patch(
+                    color=None,
+                    channels=child_patch.channels,
+                    hsv_offset=(prev_dh + cur_dh, prev_ds + self.ds, prev_dv + self.dv),
+                    dimmer_scale=child_patch.dimmer_scale * self.dimmer_scale,
+                )
+        else:
+            return Patch.from_hsv_offset(
+                dh=cur_dh,
+                ds=self.ds,
+                dv=self.dv,
+                dimmer_scale=self.dimmer_scale,
+            )
