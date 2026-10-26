@@ -233,8 +233,12 @@ class EuroliteBCL40Bar:
     """Fixture profile for the EUROLITE LED BCL-40 SMD White / RGB Bar (24-Channel Mode).
 
     Physical layout:
-      - 4 rectangular compartments
-      - Each compartment has an RGB background wash + row of Warm White & Cold White 2in1 SMD LEDs
+      - 4 columns (segments 1 to 4) arranged left to right
+      - Each column is split vertically into two square RGB backlight compartments:
+        * Top RGB square
+        * Bottom RGB square
+      - In-between the top and bottom squares runs a horizontal channel of
+        split Cold White (~6600K) and Warm White (~3200K) SMD LEDs
       - Master strobe channel gating all segments
     """
 
@@ -243,10 +247,10 @@ class EuroliteBCL40Bar:
         group: FixtureGroup,
         x: float,
         y: float,
-        width: float = 280.0,
-        height: float = 38.0,
+        width: float = 260.0,
+        height: float = 58.0,
         master_strobe: Optional[Union[FixtureGroup, Mapping[str, PrimitiveSpec]]] = None,
-        label: str = "Strobe Bar",
+        label: str = "BCL-40 Bar",
     ) -> None:
         self.group = group
         self.x = float(x)
@@ -276,10 +280,14 @@ class EuroliteBCL40Bar:
         return segments
 
     def render_svg(self, dmx_frame: Sequence[int], t: float = 0.0) -> str:
-        """Render the 4-segment physical bar with RGB wash and bi-color SMD white chips."""
+        """Render the authentic 4-segment physical bar: split top/bottom RGB squares with center CW/WW strip."""
         bx, by = self.x, self.y
         bw, bh = self.width, self.height
         seg_count = min(4, len(self.group.elements))
+        pad = 2.0
+        gap = 2.0
+        strip_h = 8.0
+        sq_h = (bh - 2 * pad - strip_h - 2 * gap) / 2.0  # Height of each RGB square
         seg_w = (bw - (seg_count - 1) * 3) / seg_count
 
         # Check master strobe
@@ -289,22 +297,28 @@ class EuroliteBCL40Bar:
                 if isinstance(prim, Channel) and prim.address <= len(dmx_frame):
                     master_strobe = dmx_frame[prim.address - 1]
 
+        strobe_active = (master_strobe >= 9)
+
         svg: list[str] = []
 
         # 1. Bar Master Strobe Bloom
-        if master_strobe > 0:
+        if strobe_active:
             svg.append(
-                f'<rect x="{bx - 12}" y="{by - 10}" width="{bw + 24}" height="{bh + 20}" rx="12" '
-                f'fill="rgba(255,255,255,0.4)" style="filter: blur(10px);"/>'
+                f'<rect x="{bx - 14}" y="{by - 12}" width="{bw + 28}" height="{bh + 24}" rx="12" '
+                f'fill="rgba(255,255,245,0.42)" style="filter: blur(10px);"/>'
             )
 
-        # 2. Outer Aluminum Housing
+        # 2. Outer Heavy-Duty Aluminum Enclosure
         svg.append(
             f'<rect x="{bx - 2}" y="{by - 2}" width="{bw + 4}" height="{bh + 4}" rx="4" '
-            f'fill="#18181b" stroke="#3f3f46" stroke-width="1.6"/>'
+            f'fill="#141417" stroke="#3f3f46" stroke-width="1.8"/>'
         )
 
-        # 3. 4 Segment Compartments
+        y_top_sq = by + pad
+        y_strip = y_top_sq + sq_h + gap
+        y_bot_sq = y_strip + strip_h + gap
+
+        # 3. 4 Segment Columns
         for i in range(seg_count):
             el = self.group.elements[i]
             sx = bx + i * (seg_w + 3)
@@ -322,45 +336,79 @@ class EuroliteBCL40Bar:
                     elif attr in ("cw", "w"):
                         cw_b = max(cw_b, v)
 
-            # Mix RGB background wash
-            bg_color = f"rgb({r_b},{g_b},{b_b})" if (r_b > 0 or g_b > 0 or b_b > 0) else "#0f172a"
+            # Colors for top & bottom RGB squares
+            has_rgb = (r_b > 0 or g_b > 0 or b_b > 0)
+            rgb_fill = f"rgb({r_b},{g_b},{b_b})" if has_rgb else "#0f172a"
+            rgb_stroke = f"rgba({r_b},{g_b},{b_b},0.4)" if has_rgb else "#1e293b"
+
+            # Top RGB square compartment
             svg.append(
-                f'<rect x="{sx:.1f}" y="{by:.1f}" width="{seg_w:.1f}" height="{bh:.1f}" '
-                f'rx="2" fill="{bg_color}" stroke="#1e293b" stroke-width="0.8"/>'
+                f'<rect x="{sx:.1f}" y="{y_top_sq:.1f}" width="{seg_w:.1f}" height="{sq_h:.1f}" '
+                f'rx="2" fill="{rgb_fill}" stroke="{rgb_stroke}" stroke-width="0.8"/>'
             )
 
-            # Center White SMD Diode Row (10 bi-color LEDs per segment)
+            # Bottom RGB square compartment
+            svg.append(
+                f'<rect x="{sx:.1f}" y="{y_bot_sq:.1f}" width="{seg_w:.1f}" height="{sq_h:.1f}" '
+                f'rx="2" fill="{rgb_fill}" stroke="{rgb_stroke}" stroke-width="0.8"/>'
+            )
+
+            # Center White Strip (in-between top and bottom squares)
             ww_norm = ww_b / 255.0
             cw_norm = cw_b / 255.0
-            has_white = (ww_b > 0 or cw_b > 0)
+            has_ww = (ww_b > 0)
+            has_cw = (cw_b > 0)
+            has_white = has_ww or has_cw
 
-            # Calculate CCT blend for the center strip
-            smd_r = min(255, int(ww_norm * WARM_WHITE_RGB[0] * 255 + cw_norm * COOL_WHITE_RGB[0] * 255))
-            smd_g = min(255, int(ww_norm * WARM_WHITE_RGB[1] * 255 + cw_norm * COOL_WHITE_RGB[1] * 255))
-            smd_b = min(255, int(ww_norm * WARM_WHITE_RGB[2] * 255 + cw_norm * COOL_WHITE_RGB[2] * 255))
-            smd_color = f"rgb({smd_r},{smd_g},{smd_b})" if has_white else "#27272a"
-
-            # Draw center reflector channel
-            cy_mid = by + bh / 2.0
+            # Reflector channel background
+            strip_bg = "#09090b"
             svg.append(
-                f'<rect x="{sx + 4:.1f}" y="{cy_mid - 4:.1f}" width="{seg_w - 8:.1f}" height="8" rx="1.5" '
-                f'fill="{smd_color}" opacity="{0.95 if has_white else 0.4:.2f}"/>'
+                f'<rect x="{sx:.1f}" y="{y_strip:.1f}" width="{seg_w:.1f}" height="{strip_h:.1f}" '
+                f'rx="1" fill="{strip_bg}" stroke="#27272a" stroke-width="0.6"/>'
             )
 
-            # 6 tiny SMD chips inside
-            chip_gap = (seg_w - 14) / 5.0
-            for c in range(6):
-                cx = sx + 7 + c * chip_gap
+            # Diffuse glow when white is lit
+            if has_white:
+                glow_r = min(255, int(ww_norm * WARM_WHITE_RGB[0] * 255 + cw_norm * COOL_WHITE_RGB[0] * 255))
+                glow_g = min(255, int(ww_norm * WARM_WHITE_RGB[1] * 255 + cw_norm * COOL_WHITE_RGB[1] * 255))
+                glow_b = min(255, int(ww_norm * WARM_WHITE_RGB[2] * 255 + cw_norm * COOL_WHITE_RGB[2] * 255))
                 svg.append(
-                    f'<rect x="{cx - 2:.1f}" y="{cy_mid - 2.5:.1f}" width="4" height="5" rx="0.5" '
-                    f'fill="{"#ffffff" if has_white else "#3f3f46"}"/>'
+                    f'<rect x="{sx + 1:.1f}" y="{y_strip + 1:.1f}" width="{seg_w - 2:.1f}" height="{strip_h - 2:.1f}" '
+                    f'rx="1" fill="rgb({glow_r},{glow_g},{glow_b})" opacity="0.35"/>'
                 )
 
-        # 4. Master Strobe indicator
-        if master_strobe > 0:
+            # 8 Alternating SMD White Diodes (CW, WW, CW, WW, CW, WW, CW, WW)
+            chip_count = 8
+            chip_step = (seg_w - 6) / (chip_count - 1)
+            chip_y = y_strip + (strip_h - 4.0) / 2.0
+
+            for c in range(chip_count):
+                is_cw_diode = (c % 2 == 0)
+                cx_chip = sx + 3 + c * chip_step
+
+                if is_cw_diode:
+                    # Cold White 6600K SMD chip
+                    if has_cw:
+                        c_fill = f"rgb({int(230 + 25*cw_norm)},{int(240 + 15*cw_norm)},255)"
+                    else:
+                        c_fill = "#262626"
+                else:
+                    # Warm White 3200K SMD chip
+                    if has_ww:
+                        c_fill = f"rgb(255,{int(190 + 30*ww_norm)},{int(100 + 40*ww_norm)})"
+                    else:
+                        c_fill = "#292524"
+
+                svg.append(
+                    f'<rect x="{cx_chip - 1.8:.1f}" y="{chip_y:.1f}" width="3.6" height="4.0" rx="0.6" '
+                    f'fill="{c_fill}" stroke="#18181b" stroke-width="0.4"/>'
+                )
+
+        # 4. Master Strobe Indicator
+        if strobe_active:
             svg.append(
-                f'<text x="{bx + bw / 2.0}" y="{by + bh / 2.0 + 5}" fill="#fef08a" font-family="system-ui, sans-serif" '
-                f'font-size="14" font-weight="bold" text-anchor="middle" '
+                f'<text x="{bx + bw / 2.0}" y="{by + bh / 2.0 + 4}" fill="#fef08a" font-family="system-ui, sans-serif" '
+                f'font-size="12" font-weight="bold" text-anchor="middle" '
                 f'style="filter: drop-shadow(0 0 4px rgba(0,0,0,0.9));">⚡ STROBE ⚡</text>'
             )
 

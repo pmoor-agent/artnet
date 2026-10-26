@@ -49,20 +49,23 @@ class TestFixtureProfiles(unittest.TestCase):
         self.assertNotIn("rgb(255,255,240)", svg_red_strobe)
 
     def test_eurolite_bcl40_bar_rendering(self) -> None:
-        """Test BCL-40 bar rendering with 4 segments and SMD diodes."""
+        """Test BCL-40 bar rendering with split top/bottom RGB squares and center CW/WW strip."""
         bar = EuroliteBCL40Bar(
             STROBE_BAR,
             x=200,
             y=100,
-            width=240,
-            height=30,
+            width=260,
+            height=58,
             master_strobe=STROBE_MASTER,
             label="Bar",
         )
-        dmx_frame = [0] * 31 + [255, 0, 0, 0, 255] + [0] * 20
+        # Drive Segment 1 (DMX 32..36): Red=255, Green=0, Blue=0, WW=255, CW=200
+        dmx_frame = [0] * 31 + [255, 0, 0, 255, 200] + [0] * 20
         svg = bar.render_svg(dmx_frame)
         self.assertIn("<rect", svg)
         self.assertIn("Bar", svg)
+        # Must render both top and bottom RGB red squares (fill="rgb(255,0,0)")
+        self.assertGreaterEqual(svg.count("fill=\"rgb(255,0,0)\""), 2)
 
     def test_my_rig_stage_integration(self) -> None:
         """Test the configured STAGE in my_rig.py."""

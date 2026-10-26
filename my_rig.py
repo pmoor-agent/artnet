@@ -107,9 +107,9 @@ STAGE = Stage(
         EuroliteBCL40Bar(
             STROBE_BAR,
             x=340,
-            y=100,
-            width=240,
-            height=30,
+            y=86,
+            width=260,
+            height=58,
             master_strobe=STROBE_MASTER,
             label="BCL-40 Bar",
         ),
