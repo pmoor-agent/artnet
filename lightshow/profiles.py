@@ -125,6 +125,22 @@ class EurolitePartySpot:
         r_b, g_b, b_b, w_b, dim_b, strobe_b = self.extract_dmx(dmx_frame)
         r_out, g_out, b_out = blend_rgbw(r_b, g_b, b_b, w_b, dim_b)
         is_lit = (r_out > 0 or g_out > 0 or b_out > 0)
+
+        # Hardware strobe on the PAR is rapid flickering of whatever color is currently showing
+        strobe_active = (strobe_b >= 11)
+        is_flash_on = True
+        if strobe_active and t > 0:
+            freq = 1.0 + ((strobe_b - 11) / (255 - 11)) * 19.0  # 1 Hz to 20 Hz
+            flash_phase = (t * freq) % 1.0
+            is_flash_on = (flash_phase < 0.65)  # 65% duty cycle flash
+
+        # If in the dark phase of the strobe flicker, attenuate output
+        if strobe_active and not is_flash_on:
+            r_out = int(r_out * 0.12)
+            g_out = int(g_out * 0.12)
+            b_out = int(b_out * 0.12)
+            is_lit = (r_out > 0 or g_out > 0 or b_out > 0)
+
         color_str = f"rgb({r_out},{g_out},{b_out})" if is_lit else "#09090b"
 
         cx, cy = self.x, self.y
@@ -136,14 +152,14 @@ class EurolitePartySpot:
 
         svg: list[str] = []
 
-        # 1. Spotlight Beam Halo / Strobe Bloom (drawn behind fixture)
+        # 1. Spotlight Beam Halo / Colored Strobe Bloom
+        # Retains the fixture's ACTUAL active color (e.g. red strobe flashes red, blue flashes blue)
         if is_lit:
-            halo_r = r_can * (2.2 if strobe_b > 0 else 1.4)
-            halo_opacity = 0.45 if strobe_b > 0 else 0.22
-            bloom_color = "rgb(255,255,240)" if strobe_b > 0 else color_str
+            halo_r = r_can * (2.1 if strobe_active else 1.4)
+            halo_opacity = 0.42 if strobe_active else 0.22
             svg.append(
                 f'<circle cx="{cx}" cy="{cy}" r="{halo_r:.1f}" '
-                f'fill="{bloom_color}" opacity="{halo_opacity:.2f}" style="filter: blur(8px);"/>'
+                f'fill="{color_str}" opacity="{halo_opacity:.2f}" style="filter: blur(8px);"/>'
             )
 
         # 2. Outer Metal Can Housing & Bezel
@@ -161,15 +177,14 @@ class EurolitePartySpot:
 
         # 4. Concentric LED Diodes:
         # Ring 1 (Inner): 3 LEDs at 120° intervals
-        inner_diode_color = "#ffffff" if (is_lit and (w_b > 180 or strobe_b > 0)) else (color_str if is_lit else "#1c1917")
+        diode_color = "#ffffff" if (is_lit and w_b > 220) else (color_str if is_lit else "#1c1917")
         for i in range(3):
             angle = i * (2.0 * math.pi / 3.0) - math.pi / 2.0
             lx = cx + r_inner * math.cos(angle)
             ly = cy + r_inner * math.sin(angle)
-            # Diode bezel & core
             svg.append(
                 f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="{r_led:.1f}" '
-                f'fill="{inner_diode_color}" stroke="#3f3f46" stroke-width="0.8"/>'
+                f'fill="{diode_color}" stroke="#3f3f46" stroke-width="0.8"/>'
             )
             if is_lit:
                 svg.append(
@@ -178,14 +193,13 @@ class EurolitePartySpot:
                 )
 
         # Ring 2 (Outer): 9 LEDs at 40° intervals
-        outer_diode_color = inner_diode_color
         for i in range(9):
             angle = i * (2.0 * math.pi / 9.0) - math.pi / 2.0
             lx = cx + r_outer * math.cos(angle)
             ly = cy + r_outer * math.sin(angle)
             svg.append(
                 f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="{r_led:.1f}" '
-                f'fill="{outer_diode_color}" stroke="#3f3f46" stroke-width="0.8"/>'
+                f'fill="{diode_color}" stroke="#3f3f46" stroke-width="0.8"/>'
             )
             if is_lit:
                 svg.append(
@@ -194,7 +208,7 @@ class EurolitePartySpot:
                 )
 
         # 5. Strobe Indicator Badge
-        if strobe_b > 0:
+        if strobe_active:
             svg.append(
                 f'<text x="{cx}" y="{cy + 4}" fill="#fef08a" font-family="system-ui, sans-serif" '
                 f'font-size="12" font-weight="bold" text-anchor="middle" '

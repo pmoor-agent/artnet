@@ -41,10 +41,12 @@ class TestFixtureProfiles(unittest.TestCase):
         self.assertGreaterEqual(circle_count, 14)
         self.assertIn("Spot 1", svg_lit)
 
-        # When strobe is active, must render lightning bolt icon
-        dmx_strobe = [255, 255, 255, 255, 255, 240] + [0] * 50
-        svg_strobe = spot.render_svg(dmx_strobe)
-        self.assertIn("⚡", svg_strobe)
+        # When strobe is active on red, the bloom and diodes must strobe in RED, not forced white!
+        dmx_red_strobe = [255, 0, 0, 0, 255, 200] + [0] * 50
+        svg_red_strobe = spot.render_svg(dmx_red_strobe)
+        self.assertIn("⚡", svg_red_strobe)
+        self.assertIn("fill=\"rgb(255,0,0)\"", svg_red_strobe)
+        self.assertNotIn("rgb(255,255,240)", svg_red_strobe)
 
     def test_eurolite_bcl40_bar_rendering(self) -> None:
         """Test BCL-40 bar rendering with 4 segments and SMD diodes."""
