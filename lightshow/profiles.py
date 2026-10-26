@@ -154,7 +154,7 @@ class EurolitePartySpot:
 
         # 1. Spotlight Beam Halo / Colored Strobe Bloom
         # Retains the fixture's ACTUAL active color (e.g. red strobe flashes red, blue flashes blue)
-        if is_lit:
+        if is_lit and not (strobe_active and not is_flash_on):
             halo_r = r_can * (2.1 if strobe_active else 1.4)
             halo_opacity = 0.42 if strobe_active else 0.22
             svg.append(
@@ -297,14 +297,19 @@ class EuroliteBCL40Bar:
                     master_strobe = dmx_frame[prim.address - 1]
 
         strobe_active = (master_strobe >= 9)
+        is_flash_on = True
+        if strobe_active and t > 0:
+            freq = 2.0 + ((master_strobe - 9) / (255 - 9)) * 18.0  # 2 Hz to 20 Hz
+            flash_phase = (t * freq) % 1.0
+            is_flash_on = (flash_phase < 0.50)  # 50% duty cycle shutter flash
 
         svg: list[str] = []
 
-        # 1. Bar Master Strobe Bloom
-        if strobe_active:
+        # 1. Bar Master Strobe Bloom (active only during the blinding flash phase)
+        if strobe_active and is_flash_on:
             svg.append(
-                f'<rect x="{bx - 14}" y="{by - 12}" width="{bw + 28}" height="{bh + 24}" rx="12" '
-                f'fill="rgba(255,255,245,0.42)" filter="url(#glow-blur)"/>'
+                f'<rect x="{bx - 16}" y="{by - 14}" width="{bw + 32}" height="{bh + 28}" rx="14" '
+                f'fill="rgba(255,255,245,0.65)" filter="url(#glow-blur)"/>'
             )
 
         # 2. Outer Heavy-Duty Aluminum Enclosure
@@ -334,6 +339,14 @@ class EuroliteBCL40Bar:
                         ww_b = v
                     elif attr in ("cw", "w"):
                         cw_b = max(cw_b, v)
+
+            # If master strobe is active and in dark phase, shutter cut-off
+            if strobe_active and not is_flash_on:
+                r_b = int(r_b * 0.05)
+                g_b = int(g_b * 0.05)
+                b_b = int(b_b * 0.05)
+                ww_b = int(ww_b * 0.05)
+                cw_b = int(cw_b * 0.05)
 
             # Colors for top & bottom RGB squares
             has_rgb = (r_b > 0 or g_b > 0 or b_b > 0)
@@ -411,14 +424,7 @@ class EuroliteBCL40Bar:
                     f'fill="{cw_fill}" stroke="#18181b" stroke-width="0.3"/>'
                 )
 
-        # 4. Master Strobe Indicator
-        if strobe_active:
-            svg.append(
-                f'<text x="{bx + bw / 2.0}" y="{by + bh / 2.0 + 4}" fill="#fef08a" stroke="#000000" stroke-width="0.8" '
-                f'font-family="system-ui, sans-serif" font-size="12" font-weight="bold" text-anchor="middle">⚡ STROBE ⚡</text>'
-            )
-
-        # 5. Label
+        # 4. Label
         if self.label:
             svg.append(
                 f'<text x="{bx + bw / 2.0}" y="{by + bh + 16}" fill="#9ca3af" font-family="system-ui, sans-serif" '
