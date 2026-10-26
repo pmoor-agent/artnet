@@ -285,8 +285,10 @@ class TestLightshow(unittest.TestCase):
         self.assertEqual(p0_lin.color, Color.YELLOW)
         self.assertEqual(p7_lin.color, Color(0, 0, 0))
 
-        # 3. Pingpong is perfectly symmetric: at t=0 only PAR 0 is lit, at middle only PAR 7 is lit
-        pp = chase_circ.pingpong()  # Automatically uses linear boundary for both directions
+        # 3. Pingpong bounces immediately without double-hitting turnaround fixtures
+        pp = chase_circ.pingpong()
+        from lightshow import PingPongChase
+        self.assertIsInstance(pp, PingPongChase)
         dur = pp.duration
         # At start of bounce (t=0.0): PAR 0 is yellow, PAR 7 is 0.0
         self.assertEqual(pp.eval(0.0, fixture=0, total_fixtures=8).color, Color.YELLOW)
@@ -294,6 +296,25 @@ class TestLightshow(unittest.TestCase):
         # At turnaround bounce (t=dur / 2): PAR 7 is yellow, PAR 0 is 0.0
         self.assertEqual(pp.eval(dur / 2.0, fixture=7, total_fixtures=8).color, Color.YELLOW)
         self.assertEqual(pp.eval(dur / 2.0, fixture=0, total_fixtures=8).color, Color(0, 0, 0))
+        # One step later on return path (t = dur / 2 + step_dt):
+        # PAR 6 is full steam (yellow), and PAR 7 is smoothly decaying (not re-triggered at 100%!)
+        step_dt = dur / 14.0
+        p6_return = pp.eval(dur / 2.0 + step_dt, fixture=6, total_fixtures=8)
+        p7_return = pp.eval(dur / 2.0 + step_dt, fixture=7, total_fixtures=8)
+        self.assertEqual(p6_return.color, Color.YELLOW)
+        self.assertLess(p7_return.color.r, 1.0)
+        self.assertGreater(p7_return.color.r, 0.5)
+
+        # 4. Sharp PingPong (tail=0.0) bounces immediately with no double flash
+        pp_sharp = Chase(Color.WHITE, step_duration=0.1, tail=0.0, num_steps=8).pingpong()
+        dur_sharp = pp_sharp.duration
+        step_sharp = dur_sharp / 14.0
+        # Turnaround at PAR 7
+        self.assertEqual(pp_sharp.eval(dur_sharp / 2.0, fixture=7, total_fixtures=8).color, Color.WHITE)
+        self.assertEqual(pp_sharp.eval(dur_sharp / 2.0, fixture=6, total_fixtures=8).color, Color(0, 0, 0))
+        # Immediate bounce back to PAR 6 on the very next step
+        self.assertEqual(pp_sharp.eval(dur_sharp / 2.0 + step_sharp, fixture=6, total_fixtures=8).color, Color.WHITE)
+        self.assertEqual(pp_sharp.eval(dur_sharp / 2.0 + step_sharp, fixture=7, total_fixtures=8).color, Color(0, 0, 0))
 
     def test_clip_and_scene_time_slicing(self) -> None:
         """Verify time slicing clip[start:stop] and scene[start:stop] with repeating."""

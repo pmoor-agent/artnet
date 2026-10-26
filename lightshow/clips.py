@@ -873,17 +873,107 @@ class Chase(Clip):
             return Patch(color=self.color * intensity)
         return Patch()
 
-    def pingpong(self) -> SequenceClip:
-        """Play forward then backward with spatial reversal and linear boundaries."""
-        forward = Chase(
+    def pingpong(self, num_steps: Optional[int] = None, wrap: bool = True) -> PingPongChase:
+        """Step back and forth through fixtures without repeating turnaround endpoints."""
+        return PingPongChase(
             self.color,
             self.step_duration,
             background=self.background,
             tail=self.tail,
-            num_steps=self.num_steps,
-            wrap=False,
+            num_steps=self.num_steps if num_steps is None else num_steps,
+            wrap=wrap,
         )
-        return SequenceClip(forward, ReverseFixturesClip(forward))
+
+
+class PingPongChase(Clip):
+    """Step back and forth through fixtures without repeating turnaround endpoints.
+
+    In an N-fixture setup, plays the unrolled bounce sequence:
+    0 -> 1 -> ... -> N-1 -> N-2 -> ... -> 1 (a cycle of 2 * (N - 1) steps).
+    The end fixtures (0 and N-1) bounce immediately on the very next step
+    instead of being triggered twice consecutively.
+    """
+
+    def __init__(
+        self,
+        color: Union[Color, float] = Color.WHITE,
+        step_duration: float = 0.25,
+        *,
+        background: Optional[Union[Color, float]] = Color.BLACK,
+        tail: float = 0.0,
+        num_steps: int = 4,
+        wrap: bool = True,
+    ) -> None:
+        self.color = Color(color, color, color) if isinstance(color, (int, float)) else color
+        if isinstance(background, (int, float)):
+            self.background: Optional[Color] = Color(background, background, background)
+        else:
+            self.background = background
+        self.step_duration = float(step_duration)
+        self.tail = max(0.0, tail)
+        self.num_steps = max(1, int(num_steps))
+        self.bounce_steps = 2 * (self.num_steps - 1) if self.num_steps > 1 else 1
+        self.duration = self.step_duration * self.bounce_steps
+        self.wrap = wrap
+
+    def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
+        n = max(1, total_fixtures)
+        if n <= 1:
+            return Patch(color=self.color)
+        m = n - 1
+        cycle_steps = 2 * m
+        step_dt = (self.duration / cycle_steps) if self.duration > 0 else self.step_duration
+        period = self.duration if self.duration > 0 else (cycle_steps * step_dt)
+        if period <= 0:
+            return Patch(color=self.color)
+
+        local_t = t % period if (self.wrap or t >= period) else t
+        if local_t < 0:
+            local_t = 0.0
+
+        trigs = [fixture * step_dt]
+        if 0 < fixture < m:
+            trigs.append((cycle_steps - fixture) * step_dt)
+
+        if self.tail <= 0.0:
+            for tr in trigs:
+                if self.wrap:
+                    dt = (local_t - tr) % period
+                    if dt > period - 1e-9:
+                        dt = 0.0
+                    if 0.0 <= dt < step_dt - 1e-9:
+                        return Patch(color=self.color)
+                else:
+                    dt = local_t - tr
+                    if -1e-9 <= dt < step_dt - 1e-9:
+                        return Patch(color=self.color)
+            return Patch(color=self.background) if self.background is not None else Patch()
+
+        intensity = 0.0
+        for tr in trigs:
+            if self.wrap:
+                for dt_raw in (local_t - tr, local_t + period - tr):
+                    dt = dt_raw
+                    if -1e-9 <= dt < 0.0:
+                        dt = 0.0
+                    if dt >= 0.0:
+                        d_steps = dt / step_dt
+                        if d_steps <= 1.0 + self.tail:
+                            intensity = max(intensity, 1.0 - d_steps / (1.0 + self.tail))
+            else:
+                dt = local_t - tr
+                if -1e-9 <= dt < 0.0:
+                    dt = 0.0
+                if dt >= 0.0:
+                    d_steps = dt / step_dt
+                    if d_steps <= 1.0 + self.tail:
+                        intensity = max(intensity, 1.0 - d_steps / (1.0 + self.tail))
+
+        if self.background is not None:
+            return Patch(color=self.background.lerp(self.color, intensity))
+        if intensity > 0.0:
+            return Patch(color=self.color * intensity)
+        return Patch()
 
 
 class Gradient(Clip):
