@@ -176,10 +176,10 @@ class EurolitePartySpot:
         )
 
         # 4. Concentric LED Diodes:
-        # Ring 1 (Inner): 3 LEDs at 120° intervals
+        # Ring 1 (Inner): 3 LEDs at 120° intervals (rotated 60°)
         diode_color = "#ffffff" if (is_lit and w_b > 220) else (color_str if is_lit else "#1c1917")
         for i in range(3):
-            angle = i * (2.0 * math.pi / 3.0) - math.pi / 2.0
+            angle = i * (2.0 * math.pi / 3.0) - math.pi / 2.0 + (math.pi / 3.0)
             lx = cx + r_inner * math.cos(angle)
             ly = cy + r_inner * math.sin(angle)
             svg.append(
