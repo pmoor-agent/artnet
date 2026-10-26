@@ -285,7 +285,7 @@ class EuroliteBCL40Bar:
         seg_count = min(4, len(self.group.elements))
         pad = 2.0
         gap = 2.0
-        strip_h = 8.0
+        strip_h = 8.6
         sq_h = (bh - 2 * pad - strip_h - 2 * gap) / 2.0  # Height of each RGB square
         seg_w = (bw - (seg_count - 1) * 3) / seg_count
 
@@ -376,31 +376,39 @@ class EuroliteBCL40Bar:
                     f'rx="1" fill="rgb({glow_r},{glow_g},{glow_b})" opacity="0.35"/>'
                 )
 
-            # 8 Alternating SMD White Diodes (CW, WW, CW, WW, CW, WW, CW, WW)
-            chip_count = 8
-            chip_step = (seg_w - 6) / (chip_count - 1)
-            chip_y = y_strip + (strip_h - 4.0) / 2.0
+            # Dense Dual-Row SMD White Diodes:
+            # Top row: Warm White (3200K), Bottom row: Cold White (6600K)
+            # High density (16 pairs per segment, 128 diodes total) with minimal inter-chip gaps
+            chip_cols = 16
+            chip_w = 3.4
+            chip_h = 3.4
+            v_gap = 0.5
+            h_step = (seg_w - 2.0 - chip_w) / max(1, chip_cols - 1)
+            y_ww = y_strip + (strip_h - (2 * chip_h + v_gap)) / 2.0
+            y_cw = y_ww + chip_h + v_gap
 
-            for c in range(chip_count):
-                is_cw_diode = (c % 2 == 0)
-                cx_chip = sx + 3 + c * chip_step
+            # Top row: Warm White (3200K)
+            ww_fill = (
+                f"rgb(255,{int(190 + 30*ww_norm)},{int(100 + 40*ww_norm)})"
+                if has_ww else "#292524"
+            )
+            # Bottom row: Cold White (6600K)
+            cw_fill = (
+                f"rgb({int(230 + 25*cw_norm)},{int(240 + 15*cw_norm)},255)"
+                if has_cw else "#262626"
+            )
 
-                if is_cw_diode:
-                    # Cold White 6600K SMD chip
-                    if has_cw:
-                        c_fill = f"rgb({int(230 + 25*cw_norm)},{int(240 + 15*cw_norm)},255)"
-                    else:
-                        c_fill = "#262626"
-                else:
-                    # Warm White 3200K SMD chip
-                    if has_ww:
-                        c_fill = f"rgb(255,{int(190 + 30*ww_norm)},{int(100 + 40*ww_norm)})"
-                    else:
-                        c_fill = "#292524"
-
+            for c in range(chip_cols):
+                cx_chip = sx + 1.0 + c * h_step
+                # Top diode: Warm White
                 svg.append(
-                    f'<rect x="{cx_chip - 1.8:.1f}" y="{chip_y:.1f}" width="3.6" height="4.0" rx="0.6" '
-                    f'fill="{c_fill}" stroke="#18181b" stroke-width="0.4"/>'
+                    f'<rect x="{cx_chip:.1f}" y="{y_ww:.1f}" width="{chip_w:.1f}" height="{chip_h:.1f}" rx="0.4" '
+                    f'fill="{ww_fill}" stroke="#18181b" stroke-width="0.3"/>'
+                )
+                # Bottom diode: Cold White
+                svg.append(
+                    f'<rect x="{cx_chip:.1f}" y="{y_cw:.1f}" width="{chip_w:.1f}" height="{chip_h:.1f}" rx="0.4" '
+                    f'fill="{cw_fill}" stroke="#18181b" stroke-width="0.3"/>'
                 )
 
         # 4. Master Strobe Indicator
