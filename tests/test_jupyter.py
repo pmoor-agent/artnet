@@ -74,13 +74,15 @@ class TestJupyterIntegration(unittest.TestCase):
         self.assertIsInstance(scrubber, StageScrubberView)
         self.assertIsInstance(scrubber, str)
         self.assertTrue(hasattr(scrubber, "_repr_html_"))
-        self.assertTrue(hasattr(scrubber, "_repr_javascript_"))
+        # Must NOT define _repr_javascript_, otherwise JupyterLab prioritizes application/javascript
+        # over text/html and renders a blank empty output cell!
+        self.assertFalse(hasattr(scrubber, "_repr_javascript_"))
         self.assertIn("stage_scrubber_", scrubber._repr_html_())
-        self.assertIn("initWidget", scrubber._repr_javascript_())
+        self.assertIn("<script>", scrubber._repr_html_())
 
-        # Formatter produces both HTML and JS
+        # Formatter produces HTML and NOT JavaScript
         self.assertIsNotNone(HTMLFormatter()(scrubber))
-        self.assertIsNotNone(JavascriptFormatter()(scrubber))
+        self.assertIsNone(JavascriptFormatter()(scrubber))
 
 
 if __name__ == "__main__":

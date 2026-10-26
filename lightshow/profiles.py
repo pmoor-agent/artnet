@@ -616,16 +616,47 @@ class Stage:
                        style="flex: 1; cursor: pointer; accent-color: #3b82f6;">
                 <span id="{widget_id}_label" style="font-family: monospace; font-size: 12px; color: #94a3b8; min-width: 48px;">0.00s</span>
             </div>
-            <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" 
-                 style="display:none;" 
-                 onload="(window['init_{widget_id}']||function(){{}})()"/>
             <script>
-            {js_logic}
+            (function() {{
+                const frames = {frames_json};
+                const slider = document.getElementById("{widget_id}_slider");
+                const view = document.getElementById("{widget_id}_view");
+                const label = document.getElementById("{widget_id}_label");
+                const playBtn = document.getElementById("{widget_id}_play");
+                if (!slider || !view || !label || !playBtn) return;
+                const totalDur = {show_dur};
+                let timer = null;
+
+                function update(idx) {{
+                    slider.value = idx;
+                    view.innerHTML = frames[idx];
+                    const t = (idx / (frames.length - 1)) * totalDur;
+                    label.innerText = t.toFixed(2) + "s";
+                }}
+
+                slider.oninput = function() {{
+                    update(parseInt(this.value));
+                }};
+
+                playBtn.onclick = function() {{
+                    if (timer) {{
+                        clearInterval(timer);
+                        timer = null;
+                        playBtn.innerText = "▶ Play";
+                    }} else {{
+                        playBtn.innerText = "⏸ Pause";
+                        timer = setInterval(function() {{
+                            let next = (parseInt(slider.value) + 1) % frames.length;
+                            update(next);
+                        }}, 1000 / {fps});
+                    }}
+                }};
+            }})();
             </script>
         </div>
         """
 
-        return StageScrubberView(html_body, js_logic)
+        return StageScrubberView(html_body)
 
 
 class HTMLView(str):
@@ -642,13 +673,8 @@ class HTMLView(str):
 class StageScrubberView(HTMLView):
     """Interactive Jupyter HTML5/JS scrubber widget for Stage animations."""
 
-    def __new__(cls, html_content: str, js_code: str = ""):
-        inst = super().__new__(cls, html_content)
-        inst._js_code = js_code
-        return inst
-
-    def _repr_javascript_(self) -> str:
-        return self._js_code
+    def __new__(cls, html_content: str):
+        return super().__new__(cls, html_content)
 
 
 def time_hash() -> int:
