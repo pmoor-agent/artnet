@@ -222,12 +222,17 @@ chase = Chase(
     step_duration=0.15,
     tail=2.0,                                    # Soft 2-fixture decay trail
     background=Color.from_hex("#0d0033"),        # Deep indigo ambient background
-).pingpong()                                     # Bounce left <-> right
+).pingpong()                                     # Bounce left <-> right cleanly across stage
 
 scene = PARS(chase @ 2.4)
 ```
 
 ![Ping-Pong Marquee Chase with Tail](./images/04_chase_pingpong.gif)
+
+> [!NOTE]
+> **Circular Loops vs. Linear Boundaries (`wrap=True/False`)**:
+> By default, `Chase(..., wrap=True)` uses circular modulo arithmetic—ideal for circular trusses or looping marquee rings where the trail wraps around from fixture 0 back into fixture 7.
+> When using `chase.pingpong()`, the engine automatically enforces linear boundaries (`wrap=False`) so the moving spot and its decay trail bounce off the stage walls with complete spatial symmetry and zero edge bleed.
 
 ### Stagger and Mirror Transforms
 

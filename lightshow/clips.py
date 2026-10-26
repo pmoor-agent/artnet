@@ -723,6 +723,7 @@ class Chase(Clip):
         background: Optional[Union[Color, float]] = Color.BLACK,
         tail: float = 0.0,
         num_steps: int = 4,
+        wrap: bool = True,
     ) -> None:
         self.color = Color(color, color, color) if isinstance(color, (int, float)) else color
         if isinstance(background, (int, float)):
@@ -732,24 +733,51 @@ class Chase(Clip):
         self.step_duration = float(step_duration)
         self.tail = max(0.0, tail)
         self.num_steps = num_steps
+        self.wrap = wrap
         self.duration = self.step_duration * self.num_steps
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         n = max(1, total_fixtures)
-        pos = ((t / self.duration) * n) % n if self.duration > 0 else 0.0
+        if self.duration <= 0:
+            pos = 0.0
+        elif self.wrap:
+            pos = ((t / self.duration) * n) % n
+        else:
+            pos = (t / self.duration) * n
+
         if self.tail <= 0.0:
-            active = int(pos) == (fixture % n)
+            active = (int(pos) == (fixture % n)) if self.wrap else (int(pos) == fixture)
             if active:
                 return Patch(color=self.color)
             return Patch(color=self.background) if self.background is not None else Patch()
 
-        dist = (pos - fixture) % n
-        intensity = max(0.0, 1.0 - dist / (1.0 + self.tail))
+        if self.wrap:
+            dist = (pos - fixture) % n
+            intensity = max(0.0, 1.0 - dist / (1.0 + self.tail))
+        else:
+            dist = pos - fixture
+            if dist < -1e-9 or dist > (1.0 + self.tail):
+                intensity = 0.0
+            else:
+                intensity = max(0.0, 1.0 - max(0.0, dist) / (1.0 + self.tail))
+
         if self.background is not None:
             return Patch(color=self.background.lerp(self.color, intensity))
         if intensity > 0:
             return Patch(color=self.color * intensity)
         return Patch()
+
+    def pingpong(self) -> SequenceClip:
+        """Play forward then backward with spatial reversal and linear boundaries."""
+        forward = Chase(
+            self.color,
+            self.step_duration,
+            background=self.background,
+            tail=self.tail,
+            num_steps=self.num_steps,
+            wrap=False,
+        )
+        return SequenceClip(forward, ReverseFixturesClip(forward))
 
 
 class Gradient(Clip):

@@ -262,6 +262,32 @@ class TestLightshow(unittest.TestCase):
         dmx_pause = rig.render_dmx({PARS: base | Pause(2.0)}, t=1.0)
         self.assertEqual(dmx_pause[0:3], [255, 0, 0])
 
+    def test_chase_wrap_and_pingpong_symmetry(self) -> None:
+        """Verify Chase wrap behavior and pingpong linear boundary symmetry."""
+        # 1. Circular Chase (wrap=True) wraps tail to the last fixture when at index 0
+        chase_circ = Chase(Color.YELLOW, step_duration=0.2, tail=2.0, wrap=True)
+        p0_circ = chase_circ.eval(0.0, fixture=0, total_fixtures=8)
+        p7_circ = chase_circ.eval(0.0, fixture=7, total_fixtures=8)
+        self.assertEqual(p0_circ.color, Color.YELLOW)
+        self.assertGreater(p7_circ.color.r, 0.5)
+
+        # 2. Linear Chase (wrap=False) does not bleed into fixture 7 when at index 0
+        chase_lin = Chase(Color.YELLOW, step_duration=0.2, tail=2.0, wrap=False)
+        p0_lin = chase_lin.eval(0.0, fixture=0, total_fixtures=8)
+        p7_lin = chase_lin.eval(0.0, fixture=7, total_fixtures=8)
+        self.assertEqual(p0_lin.color, Color.YELLOW)
+        self.assertEqual(p7_lin.color, Color(0, 0, 0))
+
+        # 3. Pingpong is perfectly symmetric: at t=0 only PAR 0 is lit, at middle only PAR 7 is lit
+        pp = chase_circ.pingpong()  # Automatically uses linear boundary for both directions
+        dur = pp.duration
+        # At start of bounce (t=0.0): PAR 0 is yellow, PAR 7 is 0.0
+        self.assertEqual(pp.eval(0.0, fixture=0, total_fixtures=8).color, Color.YELLOW)
+        self.assertEqual(pp.eval(0.0, fixture=7, total_fixtures=8).color, Color(0, 0, 0))
+        # At turnaround bounce (t=dur / 2): PAR 7 is yellow, PAR 0 is 0.0
+        self.assertEqual(pp.eval(dur / 2.0, fixture=7, total_fixtures=8).color, Color.YELLOW)
+        self.assertEqual(pp.eval(dur / 2.0, fixture=0, total_fixtures=8).color, Color(0, 0, 0))
+
 
 if __name__ == "__main__":
     unittest.main()
