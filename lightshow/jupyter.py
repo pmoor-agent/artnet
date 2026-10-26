@@ -30,6 +30,14 @@ from lightshow.clips import Clip
 from lightshow.fixtures import BoundScene, DMXCanvas, FixtureGroup, Scene
 from lightshow.artnet import ArtNetClient, Rig
 from lightshow.state import Color, Patch
+from lightshow.profiles import (
+    COOL_WHITE_RGB,
+    EuroliteBCL40Bar,
+    EurolitePartySpot,
+    Stage,
+    WARM_WHITE_RGB,
+    blend_rgbw,
+)
 
 
 # =============================================================================
@@ -457,7 +465,13 @@ def stop_stream() -> None:
 
 
 __all__ = list(lightshow.__all__) + [
+    "COOL_WHITE_RGB",
+    "EuroliteBCL40Bar",
+    "EurolitePartySpot",
     "LiveStream",
+    "Stage",
+    "WARM_WHITE_RGB",
+    "blend_rgbw",
     "render_clip_timeline_svg",
     "render_scene_timeline_svg",
     "stop_stream",

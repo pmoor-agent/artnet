@@ -93,6 +93,33 @@ STAGE_RGB = (PAR_RGB[:2] + STROBE_RGB + PAR_RGB[2:]).named("STAGE_RGB")
 
 
 # =============================================================================
+# 4. Declarative 2D Virtual Stage Layout (Physical Geometry & Profiles)
+# =============================================================================
+from lightshow.profiles import EurolitePartySpot, EuroliteBCL40Bar, Stage
+
+STAGE = Stage(
+    width=860,
+    height=240,
+    title="Physical Rig (4x Eurolite PARty Spot + BCL-40 Strobe Bar)",
+    fixtures=[
+        EurolitePartySpot(PARS[0], x=95, y=115, radius=28, label="PAR 1"),
+        EurolitePartySpot(PARS[1], x=225, y=115, radius=28, label="PAR 2"),
+        EuroliteBCL40Bar(
+            STROBE_BAR,
+            x=340,
+            y=100,
+            width=240,
+            height=30,
+            master_strobe=STROBE_MASTER,
+            label="BCL-40 Bar",
+        ),
+        EurolitePartySpot(PARS[2], x=635, y=115, radius=28, label="PAR 3"),
+        EurolitePartySpot(PARS[3], x=765, y=115, radius=28, label="PAR 4"),
+    ],
+)
+
+
+# =============================================================================
 # Rig Factory & CLI Runner
 # =============================================================================
 
