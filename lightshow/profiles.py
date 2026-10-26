@@ -146,9 +146,9 @@ class EurolitePartySpot:
         cx, cy = self.x, self.y
         r_can = self.radius
         r_dish = r_can * 0.82
-        r_inner = r_dish * 0.36
+        r_inner = r_dish * 0.24
         r_outer = r_dish * 0.72
-        r_led = max(2.5, r_can * 0.11)
+        r_led = max(2.2, r_can * 0.095)
 
         svg: list[str] = []
 
@@ -159,7 +159,7 @@ class EurolitePartySpot:
             halo_opacity = 0.42 if strobe_active else 0.22
             svg.append(
                 f'<circle cx="{cx}" cy="{cy}" r="{halo_r:.1f}" '
-                f'fill="{color_str}" opacity="{halo_opacity:.2f}" style="filter: blur(8px);"/>'
+                f'fill="{color_str}" opacity="{halo_opacity:.2f}" filter="url(#glow-blur)"/>'
             )
 
         # 2. Outer Metal Can Housing & Bezel
@@ -210,9 +210,8 @@ class EurolitePartySpot:
         # 5. Strobe Indicator Badge
         if strobe_active:
             svg.append(
-                f'<text x="{cx}" y="{cy + 4}" fill="#fef08a" font-family="system-ui, sans-serif" '
-                f'font-size="12" font-weight="bold" text-anchor="middle" '
-                f'style="filter: drop-shadow(0 0 3px rgba(0,0,0,0.8));">⚡</text>'
+                f'<text x="{cx}" y="{cy + 4}" fill="#fef08a" stroke="#000000" stroke-width="0.8" '
+                f'font-family="system-ui, sans-serif" font-size="12" font-weight="bold" text-anchor="middle">⚡</text>'
             )
 
         # 6. Optional Label below fixture
@@ -305,7 +304,7 @@ class EuroliteBCL40Bar:
         if strobe_active:
             svg.append(
                 f'<rect x="{bx - 14}" y="{by - 12}" width="{bw + 28}" height="{bh + 24}" rx="12" '
-                f'fill="rgba(255,255,245,0.42)" style="filter: blur(10px);"/>'
+                f'fill="rgba(255,255,245,0.42)" filter="url(#glow-blur)"/>'
             )
 
         # 2. Outer Heavy-Duty Aluminum Enclosure
@@ -407,9 +406,8 @@ class EuroliteBCL40Bar:
         # 4. Master Strobe Indicator
         if strobe_active:
             svg.append(
-                f'<text x="{bx + bw / 2.0}" y="{by + bh / 2.0 + 4}" fill="#fef08a" font-family="system-ui, sans-serif" '
-                f'font-size="12" font-weight="bold" text-anchor="middle" '
-                f'style="filter: drop-shadow(0 0 4px rgba(0,0,0,0.9));">⚡ STROBE ⚡</text>'
+                f'<text x="{bx + bw / 2.0}" y="{by + bh / 2.0 + 4}" fill="#fef08a" stroke="#000000" stroke-width="0.8" '
+                f'font-family="system-ui, sans-serif" font-size="12" font-weight="bold" text-anchor="middle">⚡ STROBE ⚡</text>'
             )
 
         # 5. Label
@@ -455,6 +453,11 @@ class Stage:
 
         w, h = self.width, self.height
         parts: list[str] = [
+            '<defs>'
+            '<filter id="glow-blur" x="-50%" y="-50%" width="200%" height="200%">'
+            '<feGaussianBlur stdDeviation="6"/>'
+            '</filter>'
+            '</defs>',
             f'<rect width="{w}" height="{h}" rx="8" fill="#0b0f17" stroke="#1e293b" stroke-width="1.2"/>',
             # Stage background grid lines
             f'<line x1="20" y1="{h - 35}" x2="{w - 20}" y2="{h - 35}" stroke="#1e293b" stroke-width="1" stroke-dasharray="4,4"/>',

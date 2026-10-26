@@ -98,7 +98,7 @@ STAGE_RGB = (PAR_RGB[:2] + STROBE_RGB + PAR_RGB[2:]).named("STAGE_RGB")
 from lightshow.profiles import EurolitePartySpot, EuroliteBCL40Bar, Stage
 
 STAGE = Stage(
-    width=860,
+    width=940,
     height=240,
     title="Physical Rig (4x Eurolite PARty Spot + BCL-40 Strobe Bar)",
     fixtures=[
@@ -113,8 +113,8 @@ STAGE = Stage(
             master_strobe=STROBE_MASTER,
             label="BCL-40 Bar",
         ),
-        EurolitePartySpot(PARS[2], x=635, y=115, radius=28, label="PAR 3"),
-        EurolitePartySpot(PARS[3], x=765, y=115, radius=28, label="PAR 4"),
+        EurolitePartySpot(PARS[2], x=715, y=115, radius=28, label="PAR 3"),
+        EurolitePartySpot(PARS[3], x=845, y=115, radius=28, label="PAR 4"),
     ],
 )
 
