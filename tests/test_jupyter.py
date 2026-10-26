@@ -52,6 +52,36 @@ class TestJupyterIntegration(unittest.TestCase):
         stop_stream()
         self.assertFalse(s.is_alive)
 
+    def test_stage_inspect_and_call_html_rendering(self) -> None:
+        """Verify Stage.__call__ and Stage.inspect return HTMLView/StageScrubberView with _repr_html_."""
+        from my_rig import STAGE
+        from lightshow.profiles import HTMLView, StageScrubberView
+        from IPython.core.formatters import HTMLFormatter, JavascriptFormatter
+
+        scene = PARS(Hold(Color.RED, duration=1.0))
+
+        # 1. Direct call STAGE(scene, t=0.5)
+        call_view = STAGE(scene, t=0.5)
+        self.assertIsInstance(call_view, HTMLView)
+        self.assertIsInstance(call_view, str)
+        self.assertTrue(hasattr(call_view, "_repr_html_"))
+        self.assertIn("<svg", call_view._repr_html_())
+        # Formatter produces HTML
+        self.assertIsNotNone(HTMLFormatter()(call_view))
+
+        # 2. Scrubber STAGE.inspect(scene)
+        scrubber = STAGE.inspect(scene, duration=1.0, fps=10.0)
+        self.assertIsInstance(scrubber, StageScrubberView)
+        self.assertIsInstance(scrubber, str)
+        self.assertTrue(hasattr(scrubber, "_repr_html_"))
+        self.assertTrue(hasattr(scrubber, "_repr_javascript_"))
+        self.assertIn("stage_scrubber_", scrubber._repr_html_())
+        self.assertIn("initWidget", scrubber._repr_javascript_())
+
+        # Formatter produces both HTML and JS
+        self.assertIsNotNone(HTMLFormatter()(scrubber))
+        self.assertIsNotNone(JavascriptFormatter()(scrubber))
+
 
 if __name__ == "__main__":
     unittest.main()

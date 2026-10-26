@@ -34,7 +34,9 @@ from lightshow.profiles import (
     COOL_WHITE_RGB,
     EuroliteBCL40Bar,
     EurolitePartySpot,
+    HTMLView,
     Stage,
+    StageScrubberView,
     WARM_WHITE_RGB,
     blend_rgbw,
 )
@@ -161,7 +163,7 @@ def render_clip_timeline_svg(
         current_tick += tick_step
 
     content = "".join(svg_elements)
-    return (
+    return HTMLView(
         f'<div style="max-width: {width}px; margin: 8px 0;">'
         f'<svg viewBox="0 0 {width} {total_height}" width="100%" height="{total_height}" '
         f'xmlns="http://www.w3.org/2000/svg" style="border-radius: 8px; display: block;">'
@@ -303,7 +305,7 @@ def render_scene_timeline_svg(
         current_tick += tick_step
 
     content = "".join(svg_elements)
-    return (
+    return HTMLView(
         f'<div style="max-width: {width}px; margin: 8px 0;">'
         f'<svg viewBox="0 0 {width} {total_height}" width="100%" height="{total_height}" '
         f'xmlns="http://www.w3.org/2000/svg" style="border-radius: 8px; display: block;">'
@@ -468,8 +470,10 @@ __all__ = list(lightshow.__all__) + [
     "COOL_WHITE_RGB",
     "EuroliteBCL40Bar",
     "EurolitePartySpot",
+    "HTMLView",
     "LiveStream",
     "Stage",
+    "StageScrubberView",
     "WARM_WHITE_RGB",
     "blend_rgbw",
     "render_clip_timeline_svg",

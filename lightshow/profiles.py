@@ -514,7 +514,7 @@ class Stage:
             parts.append(fix.render_svg(dmx_frame, t=t, fps=fps, max_strobe_freq=max_strobe_freq))
 
         content = "".join(parts)
-        return (
+        return HTMLView(
             f'<div style="max-width: {w}px; margin: 10px 0;">'
             f'<svg viewBox="0 0 {w} {h}" width="100%" height="{h}" xmlns="http://www.w3.org/2000/svg" '
             f'style="border-radius: 8px; display: block; box-shadow: 0 4px 12px rgba(0,0,0,0.4);">'
@@ -522,13 +522,13 @@ class Stage:
             f'</svg></div>'
         )
 
-    def __call__(self, scene_or_dmx: Union[Scene, Sequence[int]], t: float = 0.0) -> str:
-        """Shorthand `stage(scene, t=1.0)` to render SVG."""
+    def __call__(self, scene_or_dmx: Union[Scene, Sequence[int]], t: float = 0.0) -> HTMLView:
+        """Shorthand `stage(scene, t=1.0)` to render SVG in notebook cells or scripts."""
         return self.render_svg(scene_or_dmx, t=t)
 
     def _repr_html_(self) -> str:
         """Render default stage layout in notebook cell."""
-        return self.render_svg([0] * 64, t=0.0)
+        return str(self.render_svg([0] * 64, t=0.0))
 
     def inspect(
         self,
@@ -536,7 +536,7 @@ class Stage:
         *,
         duration: Optional[float] = None,
         fps: float = 20.0,
-    ) -> str:
+    ) -> StageScrubberView:
         """Interactive Jupyter widget with an animated slider to scrub the 2D stage across time!"""
         is_inf = math.isinf(scene.duration)
         show_dur = (6.0 if is_inf else scene.duration) if duration is None else duration
@@ -548,12 +548,62 @@ class Stage:
         frames = []
         for i in range(frame_count):
             t = (i / (frame_count - 1)) * show_dur
-            frames.append(self.render_svg(scene, t=t, fps=fps))
+            frames.append(str(self.render_svg(scene, t=t, fps=fps)))
 
         widget_id = f"stage_scrubber_{abs(hash(str(scene) + str(time_hash())))}"
         frames_json = json.dumps(frames)
 
-        return f"""
+        js_logic = f"""
+(function() {{
+    const initWidget = function() {{
+        const widget = document.getElementById("{widget_id}");
+        if (!widget || widget.__initialized) return;
+        widget.__initialized = true;
+
+        const frames = {frames_json};
+        const slider = document.getElementById("{widget_id}_slider");
+        const view = document.getElementById("{widget_id}_view");
+        const label = document.getElementById("{widget_id}_label");
+        const playBtn = document.getElementById("{widget_id}_play");
+        if (!slider || !view || !label || !playBtn) return;
+
+        const totalDur = {show_dur};
+        let timer = null;
+
+        function update(idx) {{
+            slider.value = idx;
+            view.innerHTML = frames[idx];
+            const t = (idx / (frames.length - 1)) * totalDur;
+            label.innerText = t.toFixed(2) + "s";
+        }}
+
+        slider.oninput = (e) => update(parseInt(e.target.value));
+
+        playBtn.onclick = () => {{
+            if (timer) {{
+                clearInterval(timer);
+                timer = null;
+                playBtn.innerText = "▶ Play";
+            }} else {{
+                playBtn.innerText = "⏸ Pause";
+                timer = setInterval(() => {{
+                    let next = (parseInt(slider.value) + 1) % frames.length;
+                    update(next);
+                }}, 1000 / {fps});
+            }}
+        }};
+    }};
+
+    window["init_{widget_id}"] = initWidget;
+    if (document.readyState === "loading") {{
+        document.addEventListener("DOMContentLoaded", initWidget);
+    }} else {{
+        setTimeout(initWidget, 0);
+    }}
+}})();
+"""
+
+        html_body = f"""
         <div id="{widget_id}" style="max-width: {self.width}px; background: #0b0f17; border: 1px solid #1e293b; 
                     border-radius: 8px; padding: 12px; margin: 10px 0; font-family: system-ui, sans-serif;">
             <div id="{widget_id}_view">
@@ -566,42 +616,39 @@ class Stage:
                        style="flex: 1; cursor: pointer; accent-color: #3b82f6;">
                 <span id="{widget_id}_label" style="font-family: monospace; font-size: 12px; color: #94a3b8; min-width: 48px;">0.00s</span>
             </div>
+            <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" 
+                 style="display:none;" 
+                 onload="(window['init_{widget_id}']||function(){{}})()"/>
             <script>
-            (function() {{
-                const frames = {frames_json};
-                const slider = document.getElementById("{widget_id}_slider");
-                const view = document.getElementById("{widget_id}_view");
-                const label = document.getElementById("{widget_id}_label");
-                const playBtn = document.getElementById("{widget_id}_play");
-                const totalDur = {show_dur};
-                let timer = null;
-
-                function update(idx) {{
-                    slider.value = idx;
-                    view.innerHTML = frames[idx];
-                    const t = (idx / (frames.length - 1)) * totalDur;
-                    label.innerText = t.toFixed(2) + "s";
-                }}
-
-                slider.oninput = (e) => update(parseInt(e.target.value));
-
-                playBtn.onclick = () => {{
-                    if (timer) {{
-                        clearInterval(timer);
-                        timer = null;
-                        playBtn.innerText = "▶ Play";
-                    }} else {{
-                        playBtn.innerText = "⏸ Pause";
-                        timer = setInterval(() => {{
-                            let next = (parseInt(slider.value) + 1) % frames.length;
-                            update(next);
-                        }}, 1000 / {fps});
-                    }}
-                }};
-            }})();
+            {js_logic}
             </script>
         </div>
         """
+
+        return StageScrubberView(html_body, js_logic)
+
+
+class HTMLView(str):
+    """A string subclass that implements `_repr_html_()` for rich display in Jupyter Notebooks.
+
+    Inheriting from `str` ensures full backward compatibility with any code expecting a normal string
+    (e.g. slicing, regex, file writes, inkscape/ffmpeg pipelines).
+    """
+
+    def _repr_html_(self) -> str:
+        return str(self)
+
+
+class StageScrubberView(HTMLView):
+    """Interactive Jupyter HTML5/JS scrubber widget for Stage animations."""
+
+    def __new__(cls, html_content: str, js_code: str = ""):
+        inst = super().__new__(cls, html_content)
+        inst._js_code = js_code
+        return inst
+
+    def _repr_javascript_(self) -> str:
+        return self._js_code
 
 
 def time_hash() -> int:
@@ -613,7 +660,9 @@ __all__ = [
     "COOL_WHITE_RGB",
     "EuroliteBCL40Bar",
     "EurolitePartySpot",
+    "HTMLView",
     "Stage",
+    "StageScrubberView",
     "WARM_WHITE_RGB",
     "blend_rgbw",
 ]
