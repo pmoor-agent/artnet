@@ -146,9 +146,9 @@ class EurolitePartySpot:
         cx, cy = self.x, self.y
         r_can = self.radius
         r_dish = r_can * 0.82
-        r_inner = r_dish * 0.24
+        r_inner = r_dish * 0.26
         r_outer = r_dish * 0.72
-        r_led = max(2.2, r_can * 0.095)
+        r_led = max(2.6, r_can * 0.125)
 
         svg: list[str] = []
 
