@@ -1,0 +1,98 @@
+# lightshow: Algebraic Art-Net / DMX Lighting DSL
+
+`lightshow` is a composable, algebraic Python framework for designing and sequencing DMX and Art-Net lighting shows.
+
+Traditional lighting control often suffers from imperative spaghetti code: manual byte arrays, hardware tick loops, and scattered timing logic. `lightshow` replaces this with a **declarative, functional timeline**:
+
+- **Continuous Functional Time**: Animations and cues are mathematical functions $f(t) \to \text{State}$, evaluated cleanly at any frame rate (30 Hz, 40 Hz, 60 Hz).
+- **Algebraic Composition**: Combine lighting patterns using standard Python operators:
+  - `>>` for time sequencing (`A >> B >> C`)
+  - `|` for concurrent layering (Last-Takes-Precedence / LTP override)
+  - `^` for additive optical blending
+  - `* n` for repetition and infinite looping (`* inf` or `.loop()`)
+  - `@ dur` for time scaling and stretching
+  - `~` for time reversal (`.pingpong()`)
+- **Spatial Distribution & Transforms**: Distribute phase waves across fixtures with `.spread()`, create marquee sweeps with `.pingpong()`, and symmetrically mirror across the stage with `.mirror()`.
+- **Physical Fixture Profiles & Visualizer**: Zero-dependency 2D SVG stage visualizer (`EurolitePartySpot`, `EuroliteBCL40Bar`) with authentic concentric LED rings, bi-color SMD diode tracks, and Nyquist-safe strobe rendering.
+- **Jupyter & Live Streaming**: Built-in interactive Jupyter scrubber widget and non-blocking background 40 Hz Art-Net streaming with live hot-reloading (`from lightshow.jupyter import *`).
+
+---
+
+## Visualizer Previews
+
+### Multi-Layer Composition
+An ambient moving gradient wave, rhythmic dimmer pulse, and synchronized strobe hits:
+
+![Multi-Layer Composition](./docs/images/05_composition_show.gif)
+
+### Symmetric Ping-Pong Marquee Chase
+Boundary-aware linear chase with trailing decay and background ambient wash:
+
+![Symmetric Ping-Pong Chase](./docs/images/04_chase_pingpong.gif)
+
+---
+
+## Quickstart
+
+```python
+from lightshow import Color, Fade, Gradient, Hold, Pulse, Rainbow, Strobe, Wait
+from lightshow.profiles import EurolitePartySpot, Stage
+
+# 1. Define your physical fixtures (e.g. 8 RGBW PARs)
+PARS = EurolitePartySpot.group("PARS", start_channels=[1 + i * 6 for i in range(8)])
+
+# 2. Compose a show using algebraic operators
+show = PARS(
+    # Layer 1: Ambient moving color wave across all 8 PARs
+    Gradient([Color.PURPLE, Color.BLUE, Color.CYAN, Color.PURPLE], duration=3.0).spread()
+    
+    # Layer 2: Rhythmic master pulse modulating dimmer from 25% to 100%
+    | (Pulse(1.0, low=0.25, high=1.0, duration=0.6, channel="dimmer") * 5)
+    
+    # Layer 3: Strobe burst on bookends and center at 2.4s
+    | (
+        Wait(2.4)
+        >> (
+            Hold(Color.RED, strobe=0.9, duration=0.6).on(0, 7)
+            | Hold(Color.WHITE, strobe=0.9, duration=0.6).on(3, 4)
+        )
+    )
+)
+
+# 3. Render 2D SVG visualizer or inspect in Jupyter
+STAGE = Stage(
+    width=840,
+    height=150,
+    fixtures=[
+        EurolitePartySpot(PARS[i], x=63 + i * 102, y=65, radius=26, label=f"PAR {i+1}")
+        for i in range(8)
+    ],
+)
+
+# In Jupyter:
+# STAGE.inspect(show, duration=3.0, fps=15)
+```
+
+---
+
+## Documentation
+
+For a comprehensive walkthrough of the DSL syntax, operator algebra, modulation LFOs, and hardware channel rules, see:
+
+📖 **[Lightshow DSL Guide & Language Reference](docs/language_guide.md)**
+
+---
+
+## Running Unit Tests
+
+The test suite runs with standard Python `unittest`:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+---
+
+## License
+
+MIT License.
