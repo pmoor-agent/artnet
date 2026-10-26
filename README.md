@@ -10,6 +10,7 @@ Traditional lighting control often suffers from imperative spaghetti code: manua
   - `|` for concurrent layering (Last-Takes-Precedence / LTP override)
   - `^` for additive optical blending
   - `* n` for repetition and infinite looping (`* inf` or `.loop()`)
+  - `[start:stop]` for time cutting and sub-range extraction (`clip[0.3:1.2]`)
   - `@ dur` for time scaling and stretching
   - `~` for time reversal (`.pingpong()`)
 - **Spatial Distribution & Transforms**: Distribute phase waves across fixtures with `.spread()`, create marquee sweeps with `.pingpong()`, and symmetrically mirror across the stage with `.mirror()`.

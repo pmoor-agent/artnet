@@ -98,6 +98,20 @@ class Clip:
         """`~clip`: Play a finite clip backwards in time."""
         return ReverseClip(self)
 
+    def __getitem__(self, item: slice) -> SliceClip:
+        """`clip[start:stop]`: Cut a time window from this clip."""
+        if not isinstance(item, slice):
+            raise TypeError(f"Clip slicing expects a slice like clip[start:stop], got {type(item).__name__}")
+        return SliceClip(self, start=item.start, stop=item.stop, step=item.step)
+
+    def cut(self, start: float = 0.0, stop: Optional[float] = None) -> SliceClip:
+        """Cut a time window [start, stop] from this clip."""
+        return SliceClip(self, start=start, stop=stop)
+
+    def slice(self, start: float = 0.0, stop: Optional[float] = None) -> SliceClip:
+        """Alias for .cut()."""
+        return self.cut(start, stop)
+
     # -------------------------------------------------------------------------
     # Fluent Combinators / Modifiers
     # -------------------------------------------------------------------------
@@ -306,6 +320,39 @@ class ReverseClip(Clip):
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         local_t = max(0.0, min(self.duration, self.duration - t))
+        return self.child.eval(local_t, fixture, total_fixtures)
+
+
+class SliceClip(Clip):
+    """Time-sliced clip capturing a sub-range [start, stop] from child (`clip[start:stop]`)."""
+
+    def __init__(
+        self,
+        child: Clip,
+        start: Optional[float] = 0.0,
+        stop: Optional[float] = None,
+        step: Optional[float] = None,
+    ) -> None:
+        self.child = child
+        self.start = max(0.0, float(start if start is not None else 0.0))
+        if stop is None:
+            self.stop = child.duration
+        else:
+            self.stop = max(self.start, float(stop))
+        self.step = float(step if step is not None else 1.0)
+        if self.step == 0.0:
+            raise ValueError("Slice step cannot be zero.")
+
+        raw_dur = self.stop - self.start
+        self.duration = raw_dur / abs(self.step) if not math.isinf(raw_dur) else inf
+
+    def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
+        if t < 0.0 or (t > self.duration and not math.isinf(self.duration)):
+            return Patch()
+        if self.step > 0:
+            local_t = self.start + t * self.step
+        else:
+            local_t = self.stop + t * self.step
         return self.child.eval(local_t, fixture, total_fixtures)
 
 

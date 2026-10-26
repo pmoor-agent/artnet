@@ -18,6 +18,7 @@ composable `Scene` supporting the same operators as `Clip`:
 
 from __future__ import annotations
 from dataclasses import dataclass
+import math
 from math import inf
 from typing import Callable, Mapping, Optional, Sequence, Union
 
@@ -449,6 +450,20 @@ class Scene:
         """`~scene`: Play a finite scene backwards in time."""
         return ReverseScene(self)
 
+    def __getitem__(self, item: slice) -> SliceScene:
+        """`scene[start:stop]`: Cut a time window from this scene."""
+        if not isinstance(item, slice):
+            raise TypeError(f"Scene slicing expects a slice like scene[start:stop], got {type(item).__name__}")
+        return SliceScene(self, start=item.start, stop=item.stop, step=item.step)
+
+    def cut(self, start: float = 0.0, stop: Optional[float] = None) -> SliceScene:
+        """Cut a time window [start, stop] from this scene."""
+        return SliceScene(self, start=start, stop=stop)
+
+    def slice(self, start: float = 0.0, stop: Optional[float] = None) -> SliceScene:
+        """Alias for .cut()."""
+        return self.cut(start, stop)
+
     def dim(self, factor: float) -> ScaleScene:
         """Scale all active channel values in this scene by `factor`."""
         return ScaleScene(self, factor)
@@ -582,6 +597,42 @@ class ReverseScene(Scene):
 
     def eval_canvas(self, t: float) -> DMXCanvas:
         local_t = max(0.0, min(self.duration, self.duration - t))
+        return self.child.eval_canvas(local_t)
+
+    def groups(self) -> list[FixtureGroup]:
+        return self.child.groups()
+
+
+class SliceScene(Scene):
+    """A scene time-sliced to [start, stop] (`scene[start:stop]`)."""
+
+    def __init__(
+        self,
+        child: Scene,
+        start: Optional[float] = 0.0,
+        stop: Optional[float] = None,
+        step: Optional[float] = None,
+    ) -> None:
+        self.child = child
+        self.start = max(0.0, float(start if start is not None else 0.0))
+        if stop is None:
+            self.stop = child.duration
+        else:
+            self.stop = max(self.start, float(stop))
+        self.step = float(step if step is not None else 1.0)
+        if self.step == 0.0:
+            raise ValueError("Slice step cannot be zero.")
+
+        raw_dur = self.stop - self.start
+        self.duration = raw_dur / abs(self.step) if not math.isinf(raw_dur) else inf
+
+    def eval_canvas(self, t: float) -> DMXCanvas:
+        if t < 0.0 or (t > self.duration and not math.isinf(self.duration)):
+            return DMXCanvas()
+        if self.step > 0:
+            local_t = self.start + t * self.step
+        else:
+            local_t = self.stop + t * self.step
         return self.child.eval_canvas(local_t)
 
     def groups(self) -> list[FixtureGroup]:

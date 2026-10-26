@@ -111,9 +111,27 @@ scene = PARS(
 | :--- | :--- | :--- | :--- |
 | `>>` | `SequenceClip` / `SequenceScene` | **Sequence (Then)**: Play A, then play B | `A >> B >> C` |
 | `* n` | `RepeatClip` / `RepeatScene` | **Repeat (Loop)**: Repeat pattern $n$ times | `Pulse(Color.RED) * 4` |
+| `[start:stop]` | `SliceClip` / `SliceScene` | **Time Slice (Cut)**: Extract sub-range $[t_{\text{start}}, t_{\text{stop}}]$ | `clip[0.3:1.2]` |
 | `@ dur` | `TimeScaleClip` / `TimeScaleScene` | **Time Scale (Stretch/Compress)**: Force duration to `dur` | `Rainbow() @ 10.0` |
 | `/ factor` | `TimeScaleClip` | **Speed Up / Slow Down**: Scale time playback speed | `clip / 2.0` (twice as fast) |
 | `~` | `ReverseClip` / `ReverseScene` | **Reverse**: Play backwards in time | `~Fade(Color.RED, Color.BLUE)` |
+
+### Time Slicing & Cutting (`clip[start:stop]` or `.cut()`)
+
+Any clip or full scene can be time-sliced using standard Python slice notation `[start:stop]` or `.cut(start, stop)`:
+
+```python
+# Cut the [0.3s, 1.2s] window from a 4-second animation (duration becomes 0.9s):
+segment = Rainbow(duration=4.0)[0.3:1.2]
+
+# Repeat that cut segment indefinitely:
+infinite_loop = segment * inf
+# or equivalently:
+infinite_loop = segment.loop()
+
+# Slicing works identically on full multi-fixture scenes:
+cut_scene = my_scene[0.3:1.2] * inf
+```
 
 ### Looping and Infinite Playback
 
@@ -352,6 +370,7 @@ stop_stream()
 | `A \| B` | Layer | Play `A` and `B` simultaneously (LTP override). |
 | `A ^ B` | Additive Blend | Layer with additive RGB photon mixing. |
 | `A * n` | Repeat | Loop `A` for $n$ cycles (use `n = inf` for infinite loop). |
+| `A[start:stop]` | Time Slice (Cut) | Extract sub-range $[t_{\text{start}}, t_{\text{stop}}]$ from clip or scene. |
 | `A @ dur` | Time Scale | Rescale playback so total duration equals `dur` seconds. |
 | `A / factor` | Speed Scale | Multiply playback speed by `factor` (`A / 2.0` = 2x speed). |
 | `~A` | Reverse | Play `A` backwards in time. |

@@ -30,6 +30,7 @@ from .clips import (
     ScaleClip,
     SequenceClip,
     SineLFO,
+    SliceClip,
     SpreadClip,
     StaggerClip,
     Strobe,
@@ -51,6 +52,7 @@ from .fixtures import (
     ScaleScene,
     Scene,
     SequenceScene,
+    SliceScene,
     TimeScaleScene,
 )
 from .state import Color, ParPatch, Patch
@@ -99,6 +101,8 @@ __all__ = [
     "SequenceClip",
     "SequenceScene",
     "SineLFO",
+    "SliceClip",
+    "SliceScene",
     "SpreadClip",
     "Strobe",
     "TimeScaleClip",

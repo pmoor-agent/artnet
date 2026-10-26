@@ -288,6 +288,58 @@ class TestLightshow(unittest.TestCase):
         self.assertEqual(pp.eval(dur / 2.0, fixture=7, total_fixtures=8).color, Color.YELLOW)
         self.assertEqual(pp.eval(dur / 2.0, fixture=0, total_fixtures=8).color, Color(0, 0, 0))
 
+    def test_clip_and_scene_time_slicing(self) -> None:
+        """Verify time slicing clip[start:stop] and scene[start:stop] with repeating."""
+        from lightshow import Rainbow, SliceClip, SliceScene
+        from my_rig import PARS
+
+        base_clip = Rainbow(duration=4.0)
+
+        # 1. Slice clip to [0.3s, 1.2s]
+        cut_clip = base_clip[0.3:1.2]
+        self.assertIsInstance(cut_clip, SliceClip)
+        self.assertAlmostEqual(cut_clip.duration, 0.9, places=6)
+
+        # At t=0.0 of cut, matches base at t=0.3
+        self.assertAlmostEqual(cut_clip.eval(0.0).color.r, base_clip.eval(0.3).color.r, places=6)
+        self.assertAlmostEqual(cut_clip.eval(0.0).color.g, base_clip.eval(0.3).color.g, places=6)
+        # At t=0.45 of cut, matches base at t=0.75
+        self.assertAlmostEqual(cut_clip.eval(0.45).color.r, base_clip.eval(0.75).color.r, places=6)
+        self.assertAlmostEqual(cut_clip.eval(0.45).color.g, base_clip.eval(0.75).color.g, places=6)
+
+        # 2. Repeat cut indefinitely (`* inf`)
+        loop_clip = cut_clip * inf
+        self.assertEqual(loop_clip.duration, inf)
+        # Verify periodic wrap around
+        self.assertAlmostEqual(loop_clip.eval(0.0).color.r, base_clip.eval(0.3).color.r, places=6)
+        self.assertAlmostEqual(loop_clip.eval(0.9).color.r, base_clip.eval(0.3).color.r, places=6)
+        self.assertAlmostEqual(loop_clip.eval(1.35).color.r, base_clip.eval(0.75).color.r, places=6)
+        self.assertAlmostEqual(loop_clip.eval(1.8).color.r, base_clip.eval(0.3).color.r, places=6)
+
+        # 3. Method aliases .cut() and .slice()
+        cut_via_method = base_clip.cut(0.3, 1.2)
+        self.assertAlmostEqual(cut_via_method.duration, 0.9, places=6)
+
+        # 4. Scene time slicing
+        scene = PARS(base_clip)
+        cut_scene = scene[0.3:1.2]
+        self.assertIsInstance(cut_scene, SliceScene)
+        self.assertAlmostEqual(cut_scene.duration, 0.9, places=6)
+
+        loop_scene = cut_scene * inf
+        self.assertEqual(loop_scene.duration, inf)
+
+        # Compare DMX output of loop_scene at t=1.0 (local_t = 0.1 -> base at 0.4s)
+        dmx_loop = loop_scene.eval_canvas(1.0).to_dmx_list(min_size=24)
+        dmx_expected = scene.eval_canvas(0.4).to_dmx_list(min_size=24)
+        self.assertEqual(dmx_loop, dmx_expected)
+
+        # 5. Invalid slicing error checks
+        with self.assertRaises(TypeError):
+            _ = base_clip[0]  # Integer indexing not allowed on temporal clip
+        with self.assertRaises(TypeError):
+            _ = scene[0]  # Integer indexing not allowed on temporal scene
+
 
 if __name__ == "__main__":
     unittest.main()
