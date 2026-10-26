@@ -272,18 +272,18 @@ red_strobe = Hold(Color.RED, strobe=0.85, duration=0.5)
 
 This example combines:
 1. **Layer 1 (Base)**: An ambient, moving 4-color gradient spread across all 8 PARs.
-2. **Layer 2 (Rhythm)**: A continuous white pulse breathing to the beat.
-3. **Layer 3 (Accent)**: A sudden strobe burst firing on the outer bookends (PAR 1 & 8) and center cluster (PAR 4 & 5) at the 2.4s drop.
+2. **Layer 2 (Rhythm)**: A continuous brightness pulse modulating fixture dimmer from 25% to 100% on the beat.
+3. **Layer 3 (Accent)**: A sudden strobe burst firing on the outer bookends (PAR 1 & 8 in Red) and center cluster (PAR 4 & 5 in White) at the 2.4s drop.
 
 ```python
 mini_show = PARS(
-    # Ambient color wave
+    # Layer 1: Ambient color wave
     Gradient([Color.PURPLE, Color.BLUE, Color.CYAN, Color.PURPLE], duration=3.0).spread()
     
-    # Rhythmic master pulse
-    | (Pulse(Color.WHITE, high=0.6, duration=0.6) * 5)
+    # Layer 2: Rhythmic master pulse modulating dimmer from 25% to 100%
+    | (Pulse(1.0, low=0.25, high=1.0, duration=0.6, channel="dimmer") * 5)
     
-    # Strobe hit at 2.4 seconds
+    # Layer 3: Strobe hit at 2.4 seconds
     | (
         Wait(2.4)
         >> (
@@ -295,6 +295,12 @@ mini_show = PARS(
 ```
 
 ![Multi-Layer Mini Lightshow](./images/05_composition_show.gif)
+
+> [!TIP]
+> **Channel Independence & LTP Overrides**:
+> Notice that Layer 2 targets `channel="dimmer"`. Because it only modulates the master dimmer and leaves `color=None`, the underlying RGB gradient from Layer 1 shines through cleanly while pulsating in brightness.
+>
+> If Layer 2 had instead pulsed an RGB color like `Color.WHITE`, the top layer's RGB values would have overridden the bottom layer's gradient colors (since `|` uses Last-Takes-Precedence for any non-empty channel). By targeting discrete channels (`"dimmer"`, `"w"`, `"strobe"`), different layers can control different optical dimensions of the same fixture simultaneously!
 
 ---
 
