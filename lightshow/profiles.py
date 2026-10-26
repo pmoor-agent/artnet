@@ -120,25 +120,36 @@ class EurolitePartySpot:
                     strobe = v
         return (r, g, b, w, dimmer, strobe)
 
-    def render_svg(self, dmx_frame: Sequence[int], t: float = 0.0) -> str:
+    def render_svg(
+        self,
+        dmx_frame: Sequence[int],
+        t: float = 0.0,
+        *,
+        fps: Optional[float] = None,
+        max_strobe_freq: float = 7.5,
+    ) -> str:
         """Render the authentic physical face of this PAR (2 rings of 3 and 9 LEDs)."""
         r_b, g_b, b_b, w_b, dim_b, strobe_b = self.extract_dmx(dmx_frame)
         r_out, g_out, b_out = blend_rgbw(r_b, g_b, b_b, w_b, dim_b)
         is_lit = (r_out > 0 or g_out > 0 or b_out > 0)
 
         # Hardware strobe on the PAR is rapid flickering of whatever color is currently showing
+        # Cap frequency to Nyquist limit (<= fps / 2) so frames never alias to static white
         strobe_active = (strobe_b >= 11)
         is_flash_on = True
         if strobe_active and t > 0:
-            freq = 1.0 + ((strobe_b - 11) / (255 - 11)) * 19.0  # 1 Hz to 20 Hz
+            limit = (fps / 2.0) if fps is not None else max_strobe_freq
+            effective_max = max(2.0, min(max_strobe_freq, limit))
+            rate_norm = (strobe_b - 11) / (255 - 11)
+            freq = 1.0 + rate_norm * (effective_max - 1.0)
             flash_phase = (t * freq) % 1.0
-            is_flash_on = (flash_phase < 0.65)  # 65% duty cycle flash
+            is_flash_on = (flash_phase < 0.50)  # 50% duty cycle flash
 
         # If in the dark phase of the strobe flicker, attenuate output
         if strobe_active and not is_flash_on:
-            r_out = int(r_out * 0.12)
-            g_out = int(g_out * 0.12)
-            b_out = int(b_out * 0.12)
+            r_out = int(r_out * 0.08)
+            g_out = int(g_out * 0.08)
+            b_out = int(b_out * 0.08)
             is_lit = (r_out > 0 or g_out > 0 or b_out > 0)
 
         color_str = f"rgb({r_out},{g_out},{b_out})" if is_lit else "#09090b"
@@ -278,7 +289,14 @@ class EuroliteBCL40Bar:
             })
         return segments
 
-    def render_svg(self, dmx_frame: Sequence[int], t: float = 0.0) -> str:
+    def render_svg(
+        self,
+        dmx_frame: Sequence[int],
+        t: float = 0.0,
+        *,
+        fps: Optional[float] = None,
+        max_strobe_freq: float = 7.5,
+    ) -> str:
         """Render the authentic 4-segment physical bar: split top/bottom RGB squares with center CW/WW strip."""
         bx, by = self.x, self.y
         bw, bh = self.width, self.height
@@ -296,10 +314,14 @@ class EuroliteBCL40Bar:
                 if isinstance(prim, Channel) and prim.address <= len(dmx_frame):
                     master_strobe = dmx_frame[prim.address - 1]
 
+        # Strobe frequency capped at Nyquist limit (<= fps / 2) to prevent aliasing
         strobe_active = (master_strobe >= 9)
         is_flash_on = True
         if strobe_active and t > 0:
-            freq = 2.0 + ((master_strobe - 9) / (255 - 9)) * 18.0  # 2 Hz to 20 Hz
+            limit = (fps / 2.0) if fps is not None else max_strobe_freq
+            effective_max = max(2.0, min(max_strobe_freq, limit))
+            rate_norm = (master_strobe - 9) / (255 - 9)
+            freq = 2.0 + rate_norm * (effective_max - 2.0)
             flash_phase = (t * freq) % 1.0
             is_flash_on = (flash_phase < 0.50)  # 50% duty cycle shutter flash
 
@@ -457,7 +479,14 @@ class Stage:
         self.height = int(height)
         self.title = title
 
-    def render_svg(self, scene_or_dmx: Union[Scene, Sequence[int]], t: float = 0.0) -> str:
+    def render_svg(
+        self,
+        scene_or_dmx: Union[Scene, Sequence[int]],
+        t: float = 0.0,
+        *,
+        fps: Optional[float] = None,
+        max_strobe_freq: float = 7.5,
+    ) -> str:
         """Render a single 2D stage snapshot at time `t` (or from raw DMX bytes)."""
         if isinstance(scene_or_dmx, Scene):
             canvas = scene_or_dmx.eval_canvas(t)
@@ -482,7 +511,7 @@ class Stage:
 
         # Render all fixtures
         for fix in self.fixtures:
-            parts.append(fix.render_svg(dmx_frame, t=t))
+            parts.append(fix.render_svg(dmx_frame, t=t, fps=fps, max_strobe_freq=max_strobe_freq))
 
         content = "".join(parts)
         return (
@@ -519,7 +548,7 @@ class Stage:
         frames = []
         for i in range(frame_count):
             t = (i / (frame_count - 1)) * show_dur
-            frames.append(self.render_svg(scene, t=t))
+            frames.append(self.render_svg(scene, t=t, fps=fps))
 
         widget_id = f"stage_scrubber_{abs(hash(str(scene) + str(time_hash())))}"
         frames_json = json.dumps(frames)
