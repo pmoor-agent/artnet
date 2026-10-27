@@ -141,25 +141,27 @@ class ControlDeck:
 
         # Check ipywidgets dynamically in active kernel
         has_widgets, version = _check_ipywidgets()
-        self._ipywidgets_available = has_widgets
+        if not has_widgets:
+            raise ImportError(
+                f"ControlDeck requires 'ipywidgets' to render interactive controls in Jupyter (reason: {version}).\n"
+                "Please install it with:\n"
+                "    pip install ipywidgets\n"
+                "And restart your Jupyter notebook kernel (Kernel -> Restart Kernel)."
+            )
+
+        self._ipywidgets_available = True
         self._ipywidgets_version = version
 
         # UI Widget components
+        global widgets
+        if widgets is None:
+            import ipywidgets as _w
+            widgets = _w
+
         self._widget: Optional[Any] = None
         self._ui_elements: dict[str, Any] = {}
-        if self._ipywidgets_available:
-            global widgets
-            if widgets is None:
-                import ipywidgets as _w
-                widgets = _w
-            self._build_widget()
-            self.log(f"Initialized ControlDeck with {len(self._scenes)} scenes (ipywidgets {version} active).")
-        else:
-            self.log(f"Initialized ControlDeck with {len(self._scenes)} scenes (ipywidgets unavailable: {version}).")
-            if not self.verbose:
-                # Print clean kernel diagnostic notice
-                print(f"[ControlDeck] Notice: ipywidgets is not active in this kernel session ({version}).")
-                print(f"[ControlDeck] Displaying static HTML preview. To enable interactive buttons: Kernel -> Restart Kernel, then re-run.")
+        self._build_widget()
+        self.log(f"Initialized ControlDeck with {len(self._scenes)} scenes (ipywidgets {version} active).")
 
     # =========================================================================
     # Properties
@@ -807,102 +809,17 @@ class ControlDeck:
 
     def show(self) -> Any:
         """Display the interactive control deck widget in the notebook."""
-        if self._widget is not None:
-            return self._widget
-        from IPython.display import HTML, display
-        display(HTML(self._repr_html_()))
+        from IPython.display import display
+        display(self._widget)
         return self
 
     def _ipython_display_(self) -> None:
         """Automatic rich display when evaluated in a Jupyter notebook cell."""
-        if self._widget is not None:
-            from IPython.display import display
-            display(self._widget)
-        else:
-            from IPython.display import HTML, display
-            display(HTML(self._repr_html_()))
+        from IPython.display import display
+        display(self._widget)
 
-    def _repr_html_(self) -> str:
-        """Fallback HTML representation if ipywidgets is unavailable."""
-        rows = []
-        for k, s in self._scenes.items():
-            is_active = (k == self._active_key)
-            is_cue = (k == self._cue_key)
-            status_tag = ""
-            if is_active:
-                status_tag = "<span style='background: #064e3b; color: #34d399; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-right: 8px;'>LIVE</span>"
-            elif is_cue:
-                status_tag = "<span style='background: #78350f; color: #fcd34d; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-right: 8px;'>CUE</span>"
-
-            dur_str = f"{s.duration:.2f}s" if not math.isinf(s.duration) else "∞ (loop)"
-            name_color = "#34d399" if is_active else "#f8fafc"
-            row_bg = "#1e293b" if is_active else "#0f172a"
-
-            rows.append(
-                f"<tr style='background: {row_bg} !important; border-bottom: 1px solid #334155;'>"
-                f"<td style='padding: 8px 12px; color: {name_color} !important; font-weight: 600; font-family: system-ui, sans-serif;'>{status_tag}{html.escape(k)}</td>"
-                f"<td style='padding: 8px 12px; color: #94a3b8 !important; font-family: monospace;'>{dur_str}</td>"
-                f"</tr>"
-            )
-        scene_rows = "".join(rows)
-
-        status_text = "STREAMING" if self.is_playing else ("PAUSED" if self.is_paused else "STOPPED")
-        status_color = "#22c55e" if self.is_playing else ("#eab308" if self.is_paused else "#64748b")
-
-        recent_logs = "<br>".join(
-            f"<span style='color: #64748b;'>{html.escape(h[1][:10])}</span> <span style='color: #cbd5e1;'>{html.escape(h[1][10:])}</span>"
-            for h in (self.history[-3:] if self.history else [(0, "[ControlDeck] Ready.")])
-        )
-
-        gui_hint = ""
-        if not self._ipywidgets_available:
-            gui_hint = f"""
-            <div style="background: #1e1b4b !important; border: 1px solid #4338ca; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; font-size: 12px; color: #c7d2fe !important; line-height: 1.5;">
-                <div style="font-weight: 700; color: #a5b4fc !important; margin-bottom: 4px;">💡 Pushable Buttons & Sliders (ipywidgets)</div>
-                Interactive buttons require <code>ipywidgets</code> in the kernel. In this session: <em>{html.escape(str(self._ipywidgets_version))}</em>.<br>
-                To enable the full interactive DJ/VJ buttons and sliders:
-                <ol style="margin: 4px 0 2px 18px; padding: 0;">
-                    <li>Restart your Jupyter kernel (<strong>Kernel &rarr; Restart Kernel</strong>)</li>
-                    <li>Re-run this cell</li>
-                </ol>
-            </div>
-            """
-
-        return f"""
-        <div style="font-family: system-ui, sans-serif; background: #0b0f17 !important; border: 1px solid #1e293b; border-radius: 10px; padding: 16px; max-width: 650px; color: #f8fafc !important; margin: 10px 0; box-shadow: 0 8px 20px rgba(0,0,0,0.5);">
-            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #1e293b; padding-bottom: 10px; margin-bottom: 10px;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 18px;">🎛️</span>
-                    <strong style="font-size: 14px; letter-spacing: 0.5px;">CONTROL DECK:</strong>
-                    <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: {status_color}22; color: {status_color}; border: 1px solid {status_color}55;">
-                        <span style="width: 8px; height: 8px; border-radius: 50%; background: {status_color};"></span>
-                        {status_text}
-                    </span>
-                </div>
-                <span style="font-size: 12px; color: #38bdf8; font-weight: 600; font-family: monospace;">{self.tempo.bpm:g} BPM</span>
-            </div>
-
-            {gui_hint}
-
-            <table style="width: 100% !important; background: #0f172a !important; font-size: 12px; border-collapse: collapse; margin: 8px 0; border: 1px solid #1e293b; border-radius: 6px; overflow: hidden;">
-                <thead>
-                    <tr style="background: #111827 !important; border-bottom: 1px solid #334155; text-align: left; color: #94a3b8 !important;">
-                        <th style="padding: 8px 12px; font-weight: 600;">Scene Name</th>
-                        <th style="padding: 8px 12px; font-weight: 600;">Duration</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {scene_rows}
-                </tbody>
-            </table>
-
-            <div style="background: #06090e !important; border: 1px solid #1e293b; border-radius: 6px; padding: 8px 12px; font-family: monospace; font-size: 11px; line-height: 1.4; margin-top: 10px;">
-                <div style="color: #64748b; font-size: 10px; font-weight: 600; text-transform: uppercase; margin-bottom: 3px;">Kernel Log</div>
-                {recent_logs}
-            </div>
-
-            <div style="font-size: 11px; color: #94a3b8; margin-top: 10px;">
-                <strong>Python Control:</strong> <code>deck.play()</code> &nbsp;|&nbsp; <code>deck.next()</code> &nbsp;|&nbsp; <code>deck.go()</code> &nbsp;|&nbsp; <code>deck.set_bpm({self.tempo.bpm:g})</code>
-            </div>
-        </div>
-        """
+    def _repr_mimebundle_(self, include=None, exclude=None):
+        """Delegate rich MIME bundle rendering directly to the ipywidgets container."""
+        if hasattr(self._widget, "_repr_mimebundle_"):
+            return self._widget._repr_mimebundle_(include=include, exclude=exclude)
+        return None

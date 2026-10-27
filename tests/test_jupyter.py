@@ -421,15 +421,21 @@ class TestJupyterIntegration(unittest.TestCase):
             self.assertTrue(len(deck.history) >= 5)
             self.assertTrue(any("PLAY" in msg for _, msg in deck.history))
 
-            # HTML repr fallback and table styling
-            html_repr = deck._repr_html_()
-            self.assertIn("CONTROL DECK:", html_repr)
-            self.assertIn("Red PARs", html_repr)
-            self.assertIn("White PARs", html_repr)
-            self.assertIn("!important", html_repr)
-            self.assertIn("</td></tr>", html_repr)
+            # 11. Rich MIME bundle display (no HTML fallback, pure widget)
+            bundle = deck._repr_mimebundle_()
+            self.assertIsNotNone(bundle)
+            self.assertIn("application/vnd.jupyter.widget-view+json", bundle)
+            self.assertFalse(hasattr(deck, "_repr_html_"))
         finally:
             deck.stop()
+
+        # 12. Missing dependency error handling
+        from unittest import mock
+        with mock.patch("lightshow.deck._check_ipywidgets", return_value=(False, "No module named 'ipywidgets'")):
+            with self.assertRaises(ImportError) as ctx:
+                ControlDeck({"A": s1}, rig=rig)
+            self.assertIn("pip install ipywidgets", str(ctx.exception))
+            self.assertIn("Restart Kernel", str(ctx.exception))
 
 
 if __name__ == "__main__":
