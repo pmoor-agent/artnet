@@ -44,6 +44,7 @@ from lightshow.profiles import (
     inspect_dmx,
 )
 from lightshow.inspector import parse_width
+from .deck import ControlDeck
 
 
 # =============================================================================
@@ -383,8 +384,18 @@ class LiveStream:
         self._pause_event.set()  # Playing by default
         self._start_time = time.monotonic()
         self._paused_elapsed = 0.0
+        self._pause_timestamp: Optional[float] = None
         self._thread: Optional[threading.Thread] = None
         self._packets_sent = 0
+
+        self.master: float = 1.0
+        self.is_blackout: bool = False
+
+        self._transition_active: bool = False
+        self._transition_from: Optional[Scene] = None
+        self._transition_from_start: float = 0.0
+        self._transition_start_time: float = 0.0
+        self._transition_duration: float = 0.0
 
         self.tempo: Optional[Tempo] = tempo if tempo is not None else self._find_tempo(self._current_scene)
         if self.tempo is not None:
@@ -465,7 +476,32 @@ class LiveStream:
     def update(self, new_scene: Union[Scene, Clip]) -> None:
         """Hot-swap the playing scene immediately on the fly without stopping DMX."""
         with self._scene_lock:
+            self._transition_active = False
+            self._transition_from = None
             self._current_scene = self.rig._to_scene(new_scene)
+            self._start_time = time.monotonic()
+            if self.tempo is None:
+                new_t = self._find_tempo(self._current_scene)
+                if new_t is not None:
+                    self.tempo = new_t
+                    self.tempo.on_change(self._on_tempo_change)
+
+    def transition_to(self, new_scene: Union[Scene, Clip], duration: float = 1.0) -> None:
+        """Smoothly crossfade into `new_scene` over `duration` seconds."""
+        if duration <= 0.0:
+            self.update(new_scene)
+            return
+
+        with self._scene_lock:
+            now = time.monotonic()
+            self._transition_from = self._current_scene
+            self._transition_from_start = self._start_time
+            self._current_scene = self.rig._to_scene(new_scene)
+            self._start_time = now
+            self._transition_start_time = now
+            self._transition_duration = max(0.05, float(duration))
+            self._transition_active = True
+
             if self.tempo is None:
                 new_t = self._find_tempo(self._current_scene)
                 if new_t is not None:
@@ -474,11 +510,36 @@ class LiveStream:
 
     def pause(self) -> None:
         """Pause playback and packet transmission."""
-        self._pause_event.clear()
+        if self._pause_event.is_set():
+            self._pause_event.clear()
+            self._pause_timestamp = time.monotonic()
 
     def resume(self) -> None:
         """Resume playback."""
-        self._pause_event.set()
+        if not self._pause_event.is_set():
+            if self._pause_timestamp is not None:
+                pause_duration = time.monotonic() - self._pause_timestamp
+                self._start_time += pause_duration
+                self._pause_timestamp = None
+            self._pause_event.set()
+        if not self.is_alive:
+            self.start()
+
+    def set_master(self, master: float) -> None:
+        """Set master dimmer intensity in [0.0, 1.0]."""
+        with self._scene_lock:
+            self.master = max(0.0, min(1.0, float(master)))
+
+    def toggle_blackout(self) -> bool:
+        """Toggle master blackout without stopping playback. Returns True if now blacked out."""
+        with self._scene_lock:
+            self.is_blackout = not self.is_blackout
+            return self.is_blackout
+
+    def set_blackout(self, active: bool) -> None:
+        """Set master blackout state."""
+        with self._scene_lock:
+            self.is_blackout = bool(active)
 
     def blackout(self) -> None:
         """Send immediate blackout."""
@@ -498,6 +559,23 @@ class LiveStream:
     def is_alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
+    def _canvas_to_dmx(self, scene_canvas: DMXCanvas) -> list[int]:
+        """Merge canvas with rig fixture defaults, apply master dimmer/blackout, and return DMX bytes."""
+        max_ch = max(
+            [g.max_channel for g in self.rig.groups]
+            + [24]
+        )
+        if self.is_blackout:
+            return [0] * max_ch
+
+        base_canvas = DMXCanvas()
+        for grp in self.rig.groups:
+            grp.register_canvas_defaults(base_canvas)
+        merged = base_canvas.merge(scene_canvas, mode="override")
+        if self.master < 1.0:
+            merged = merged.scale(self.master)
+        return merged.to_dmx_list(min_size=max_ch)
+
     def _loop(self) -> None:
         frame_interval = 1.0 / self.fps
         next_frame = time.monotonic()
@@ -506,10 +584,30 @@ class LiveStream:
         while not self._stop_event.is_set():
             if self._pause_event.is_set():
                 now = time.monotonic()
-                t = now - self._start_time
                 with self._scene_lock:
-                    scene = self._current_scene
-                dmx = self.rig.render_dmx(scene, t)
+                    if self.is_blackout:
+                        dmx = self._canvas_to_dmx(DMXCanvas())
+                    else:
+                        if self._transition_active:
+                            elapsed = now - self._transition_start_time
+                            alpha = elapsed / self._transition_duration if self._transition_duration > 0 else 1.0
+                            if alpha >= 1.0:
+                                self._transition_active = False
+                                self._transition_from = None
+                                t = now - self._start_time
+                                canvas = self._current_scene.eval_canvas(t)
+                            else:
+                                t_a = now - self._transition_from_start
+                                t_b = now - self._start_time
+                                canvas_a = self._transition_from.eval_canvas(t_a)
+                                canvas_b = self._current_scene.eval_canvas(t_b)
+                                canvas = canvas_a.scale(1.0 - alpha).merge(canvas_b.scale(alpha), mode="add")
+                        else:
+                            t = now - self._start_time
+                            canvas = self._current_scene.eval_canvas(t)
+
+                        dmx = self._canvas_to_dmx(canvas)
+
                 if not self.rig.dry_run:
                     self.rig.client.send_dmx(dmx)
                 self._packets_sent += 1
@@ -591,6 +689,7 @@ def stop_stream() -> None:
 
 __all__ = list(lightshow.__all__) + [
     "COOL_WHITE_RGB",
+    "ControlDeck",
     "DMXFrameView",
     "EuroliteBCL40Bar",
     "EurolitePartySpot",

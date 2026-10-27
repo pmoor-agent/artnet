@@ -590,6 +590,50 @@ stream(PARS(Rainbow(duration=2.0).spread()))
 stop_stream()
 ```
 
+### Live DJ/VJ Mixing Deck (`ControlDeck`)
+Turn your Jupyter notebook into an interactive DJ/VJ lighting console with two-channel scene cueing, smooth crossfades, transport buttons, Tap Tempo, and grand master dimmer:
+
+```python
+from lightshow.jupyter import ControlDeck
+from my_rig import STAGE, PARS, STROBE_BAR, create_rig
+
+# 1. Load any dictionary or playlist of scenes:
+deck = ControlDeck(
+    {
+        "Disco Night": disco_show,
+        "Rainbow Chase": PARS(Rainbow() * 2),
+        "Pulse Groove": PARS(Pulse() * 4),
+        "Halloween Strobe": STROBE_BAR(Strobe(15.0)),
+    },
+    rig=create_rig(dry_run=True),
+    bpm=128.0,
+    transition_time=1.0,  # 1-second crossfade
+)
+
+# 2. Display the interactive deck in Jupyter:
+deck
+```
+
+The interactive deck provides:
+- **🔴 LIVE PROGRAM vs 🟡 CUE (NEXT)**: Pre-select what to play next in the Cue dropdown without interrupting the live stage lights.
+- **⇄ FADE / GO & ⚡ CUT**: Trigger smooth crossfading between scenes over the selected transition time (or hard cut immediately) and automatically advance the cue.
+- **Transport Controls**: `▶ Play`, `⏸ Pause` (freezes output without losing beat clock), `⏹ Stop` (blacks out rig and terminates thread), and `⚡ Blackout` (instant mute/unmute toggle).
+- **Tempo & Tap Tempo**: Real-time BPM slider, `[ 🥁 TAP TEMPO ]` button for manual beat tapping, and `[ ÷2 ]` / `[ ×2 ]` half/double time multipliers.
+- **Grand Master**: Dimmer slider (0% to 100%) and quick presets (`100%`, `75%`, `50%`, `0%`).
+- **Full Programmatic API**:
+  ```python
+  deck.play()
+  deck.select("Disco Night")             # Instant hard cut
+  deck.cue("Rainbow Chase")              # Pre-select next cue
+  deck.go()                              # Smooth crossfade to cue
+  deck.next(fade=True)                   # Crossfade to next in list
+  deck.set_bpm(132.0)                    # Change tempo
+  deck.tap()                             # Tap tempo
+  deck.set_master(0.8)                   # 80% brightness
+  deck.toggle_blackout()                 # Mute/unmute
+  deck.add("Encore", encore_scene)       # Add scene on the fly!
+  ```
+
 ---
 
 ## 10. Quick Reference Cheat Sheet
@@ -662,3 +706,4 @@ stop_stream()
 | `clip.mirror()` | Symmetrically reflect animation from center outward. |
 | `clip.loop(n=inf)` | Repeat clip $n$ times (default infinite). |
 | `clip.dim(factor)` | Scale overall brightness by `factor`. |
+| `ControlDeck(scenes)` | Interactive DJ/VJ live mixing deck with scene dropdowns, smooth crossfades, Tap Tempo, and grand master. |

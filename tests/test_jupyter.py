@@ -334,6 +334,96 @@ class TestJupyterIntegration(unittest.TestCase):
         scrubber_stage_custom = STAGE.inspect(scene, duration=1.0, fps=5.0, width=1200)
         self.assertIn("max-width: 1200px", scrubber_stage_custom)
 
+    def test_control_deck_and_crossfade(self) -> None:
+        """Verify ControlDeck live scene mixing, cueing, transport, tempo, master, and widget callbacks."""
+        from lightshow import Hold, Color
+        from my_rig import PARS, STROBE_BAR, create_rig
+        from lightshow.jupyter import ControlDeck
+
+        rig = create_rig(dry_run=True)
+        s1 = PARS(Hold(Color.RED, duration=1.0))
+        s2 = STROBE_BAR(Hold(Color.BLUE, duration=1.0))
+        s3 = PARS(Hold(Color.GREEN, duration=1.0))
+
+        deck = ControlDeck(
+            {"Red PARs": s1, "Blue Bar": s2, "Green PARs": s3},
+            rig=rig,
+            bpm=120.0,
+            transition_time=0.5,
+        )
+
+        try:
+            # 1. Initial State
+            self.assertEqual(deck.scene_names, ["Red PARs", "Blue Bar", "Green PARs"])
+            self.assertEqual(deck.current_scene_name, "Red PARs")
+            self.assertEqual(deck.cue_scene_name, "Blue Bar")
+            self.assertEqual(deck.bpm, 120.0)
+            self.assertEqual(deck.master, 1.0)
+            self.assertFalse(deck.is_blackout)
+
+            # 2. Transport
+            deck.play()
+            self.assertTrue(deck.is_playing)
+            deck.pause()
+            self.assertTrue(deck.is_paused)
+
+            # 3. Scene Selection & Cueing
+            deck.select("Blue Bar")
+            self.assertEqual(deck.current_scene_name, "Blue Bar")
+            deck.cue("Green PARs")
+            self.assertEqual(deck.cue_scene_name, "Green PARs")
+
+            # 4. Crossfade GO and Cue Advance
+            deck.go()
+            self.assertEqual(deck.current_scene_name, "Green PARs")
+            # Advances cue to next in order: Green is index 2 -> loops to index 0 ("Red PARs")
+            self.assertEqual(deck.cue_scene_name, "Red PARs")
+
+            # 5. Next & Prev
+            deck.next()
+            self.assertEqual(deck.current_scene_name, "Red PARs")
+            deck.prev()
+            self.assertEqual(deck.current_scene_name, "Green PARs")
+
+            # 6. Tempo Controls
+            deck.set_bpm(140.0)
+            self.assertEqual(deck.bpm, 140.0)
+            deck.multiply_bpm(0.5)
+            self.assertEqual(deck.bpm, 70.0)
+            deck.multiply_bpm(2.0)
+            self.assertEqual(deck.bpm, 140.0)
+
+            # 7. Grand Master & Blackout
+            deck.set_master(0.65)
+            self.assertAlmostEqual(deck.master, 0.65)
+            self.assertTrue(deck.toggle_blackout())
+            self.assertTrue(deck.is_blackout)
+            self.assertFalse(deck.toggle_blackout())
+            self.assertFalse(deck.is_blackout)
+
+            # 8. Dynamic Scene Addition
+            s4 = PARS(Hold(Color.WHITE, duration=1.0))
+            deck.add("White PARs", s4)
+            self.assertIn("White PARs", deck.scene_names)
+            self.assertIn("White PARs", deck._ui_elements["active_dropdown"].options)
+
+            # 9. Widget & UI Handlers
+            self.assertIsNotNone(deck.widget)
+            play_btn = deck._ui_elements["play_btn"]
+            play_btn._click_handlers(play_btn)
+            self.assertTrue(deck.is_playing)
+
+            pause_btn = deck._ui_elements["pause_btn"]
+            pause_btn._click_handlers(pause_btn)
+            self.assertTrue(deck.is_paused)
+
+            # HTML repr fallback
+            html_repr = deck._repr_html_()
+            self.assertIn("CONTROL DECK:", html_repr)
+            self.assertIn("Red PARs", html_repr)
+        finally:
+            deck.stop()
+
 
 if __name__ == "__main__":
     unittest.main()
