@@ -81,6 +81,7 @@ class ControlDeck:
         transition_time: float = 1.0,
         master: float = 1.0,
         autoplay: bool = False,
+        loop: bool = True,
         verbose: bool = False,
         host: str = "192.168.1.158",
         universe: int = 1,
@@ -131,6 +132,7 @@ class ControlDeck:
             rig=self.rig,
             tempo=self.tempo,
             fps=self.fps,
+            loop=loop,
         )
         self.streamer.set_master(master)
         if autoplay:
@@ -216,6 +218,22 @@ class ControlDeck:
     def is_blackout(self) -> bool:
         """Whether master blackout is active."""
         return self.streamer.is_blackout
+
+    @property
+    def loop(self) -> bool:
+        """Whether active scenes loop continuously when streaming."""
+        return self.streamer.loop
+
+    @loop.setter
+    def loop(self, value: bool) -> None:
+        self.streamer.loop = bool(value)
+        self.log(f"Looping {'ENABLED (infinite)' if self.streamer.loop else 'DISABLED (1-shot)'}.")
+        self._sync_ui()
+
+    def toggle_loop(self) -> bool:
+        """Toggle infinite looping of scenes on/off."""
+        self.loop = not self.loop
+        return self.loop
 
     @property
     def widget(self) -> Optional[Any]:
@@ -550,15 +568,21 @@ class ControlDeck:
         pause_btn = widgets.Button(description="⏸ Pause", layout=widgets.Layout(width="90px"), button_style="warning")
         stop_btn = widgets.Button(description="⏹ Stop", layout=widgets.Layout(width="80px"))
         blackout_btn = widgets.Button(description="⚡ Blackout", layout=widgets.Layout(width="110px"), button_style="danger")
+        loop_btn = widgets.Button(
+            description="🔁 Loop: ON" if self.loop else "➡ Loop: OFF",
+            layout=widgets.Layout(width="110px"),
+            button_style="info" if self.loop else "",
+        )
 
         self._ui_elements["play_btn"] = play_btn
         self._ui_elements["pause_btn"] = pause_btn
         self._ui_elements["stop_btn"] = stop_btn
         self._ui_elements["blackout_btn"] = blackout_btn
+        self._ui_elements["loop_btn"] = loop_btn
 
         transport_box = widgets.VBox([
             widgets.HTML('<div class="artnet-deck-label">TRANSPORT</div>'),
-            widgets.HBox([play_btn, pause_btn, stop_btn, blackout_btn], layout=widgets.Layout(margin="4px 0")),
+            widgets.HBox([play_btn, pause_btn, stop_btn, blackout_btn, loop_btn], layout=widgets.Layout(margin="4px 0")),
         ], layout=widgets.Layout(flex="1"))
 
         master_slider = widgets.IntSlider(
@@ -675,6 +699,7 @@ class ControlDeck:
         pause_btn.on_click(lambda b: self.pause())
         stop_btn.on_click(lambda b: self.stop())
         blackout_btn.on_click(lambda b: self.toggle_blackout())
+        loop_btn.on_click(lambda b: self.toggle_loop())
 
         prev_btn.on_click(lambda b: self.prev())
         next_btn.on_click(lambda b: self.next())
@@ -738,6 +763,15 @@ class ControlDeck:
                 elems["blackout_btn"].description = "⚡ Blackout"
                 elems["blackout_btn"].button_style = ""
 
+        # Loop button visual styling
+        if "loop_btn" in elems:
+            if self.loop:
+                elems["loop_btn"].description = "🔁 Loop: ON"
+                elems["loop_btn"].button_style = "info"
+            else:
+                elems["loop_btn"].description = "➡ Loop: OFF"
+                elems["loop_btn"].button_style = ""
+
     def _render_log_html(self) -> str:
         """Render recent kernel log lines into an HTML card."""
         recent = self.history[-4:] if self.history else [(time.monotonic(), "[ControlDeck] Ready.")]
@@ -790,11 +824,14 @@ class ControlDeck:
         if getattr(self.streamer, "_transition_active", False):
             trans_status = f'<span style="color: #38bdf8; font-weight: bold;">Crossfading ({self.transition_time:.1f}s)...</span>'
 
+        loop_status = '<span style="color: #38bdf8;">🔁 ON</span>' if self.loop else '<span style="color: #64748b;">1x</span>'
+
         return f"""
         <div style="display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #64748b; font-family: monospace; padding-top: 6px;">
             <div>
                 <strong>Active:</strong> <span style="color: #f1f5f9;">{html.escape(self.current_scene_name)}</span> &nbsp;|&nbsp;
                 <strong>Cue:</strong> <span style="color: #fcd34d;">{html.escape(self.cue_scene_name)}</span> &nbsp;|&nbsp;
+                <strong>Loop:</strong> {loop_status} &nbsp;|&nbsp;
                 <strong>Trans:</strong> {trans_status}
             </div>
             <div>

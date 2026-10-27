@@ -525,6 +525,16 @@ class Scene:
     def __rmul__(self, count: Union[int, float]) -> RepeatScene:
         return self.__mul__(count)
 
+    def loop(self, count: Union[int, float, Any] = inf) -> RepeatScene:
+        """Loop this scene `count` times (defaults to infinite loop `inf`).
+
+        Examples:
+            scene.loop()       # Repeat indefinitely
+            scene.loop(4)      # Repeat 4 times
+            scene * inf        # Algebraic syntax for infinite loop
+        """
+        return self.__mul__(count)
+
     @property
     def is_absolute(self) -> bool:
         """Whether this scene has absolute duration and resists scaling in sequences."""

@@ -386,9 +386,14 @@ class LiveStream:
         host: str = "192.168.1.158",
         universe: int = 1,
         fps: float = 40.0,
+        master: float = 1.0,
+        loop: bool = True,
+        verbose: bool = False,
     ) -> None:
         self.rig = rig or Rig(host=host, universe=universe, fps=fps)
         self.fps = fps
+        self.loop = loop
+        self.verbose = verbose
         self._scene_lock = threading.Lock()
         self._current_scene: Scene = self.rig._to_scene(scene)
 
@@ -401,7 +406,7 @@ class LiveStream:
         self._thread: Optional[threading.Thread] = None
         self._packets_sent = 0
 
-        self.master: float = 1.0
+        self.master: float = max(0.0, min(1.0, float(master)))
         self.is_blackout: bool = False
 
         self._transition_active: bool = False
@@ -589,6 +594,15 @@ class LiveStream:
             merged = merged.scale(self.master)
         return merged.to_dmx_list(min_size=max_ch)
 
+    def _eval_time(self, now: float, start: float, scene: Optional[Scene]) -> float:
+        """Calculate evaluation time, applying automatic loop modulo when loop=True."""
+        elapsed = max(0.0, now - start)
+        if self.loop and scene is not None:
+            dur = scene.duration
+            if dur > 0 and not math.isinf(dur):
+                return elapsed % dur
+        return elapsed
+
     def _loop(self) -> None:
         frame_interval = 1.0 / self.fps
         next_frame = time.monotonic()
@@ -607,16 +621,16 @@ class LiveStream:
                             if alpha >= 1.0:
                                 self._transition_active = False
                                 self._transition_from = None
-                                t = now - self._start_time
+                                t = self._eval_time(now, self._start_time, self._current_scene)
                                 canvas = self._current_scene.eval_canvas(t)
                             else:
-                                t_a = now - self._transition_from_start
-                                t_b = now - self._start_time
+                                t_a = self._eval_time(now, self._transition_from_start, self._transition_from)
+                                t_b = self._eval_time(now, self._start_time, self._current_scene)
                                 canvas_a = self._transition_from.eval_canvas(t_a)
                                 canvas_b = self._current_scene.eval_canvas(t_b)
                                 canvas = canvas_a.scale(1.0 - alpha).merge(canvas_b.scale(alpha), mode="add")
                         else:
-                            t = now - self._start_time
+                            t = self._eval_time(now, self._start_time, self._current_scene)
                             canvas = self._current_scene.eval_canvas(t)
 
                         dmx = self._canvas_to_dmx(canvas)
@@ -671,14 +685,16 @@ def stream(
     host: str = "192.168.1.158",
     universe: int = 1,
     fps: float = 40.0,
+    loop: bool = True,
 ) -> LiveStream:
-    """Stream `scene` in the background.
+    """Stream `scene` in the background (loops continuously by default).
 
     If an active stream is already running, seamlessly hot-swaps to `scene`
     without stopping or dropping DMX sync!
     """
     global _active_stream
     if _active_stream is not None and _active_stream.is_alive:
+        _active_stream.loop = loop
         _active_stream.update(scene)
         if tempo is not None:
             if _active_stream.tempo is not None:
@@ -687,7 +703,7 @@ def stream(
             _active_stream.tempo.on_change(_active_stream._on_tempo_change)
         return _active_stream
 
-    _active_stream = LiveStream(scene, rig=rig, tempo=tempo, host=host, universe=universe, fps=fps)
+    _active_stream = LiveStream(scene, rig=rig, tempo=tempo, host=host, universe=universe, fps=fps, loop=loop)
     _active_stream.start()
     return _active_stream
 

@@ -235,6 +235,26 @@ class TestLightshow(unittest.TestCase):
         inf_loop = fade * inf
         self.assertEqual(inf_loop.duration, inf)
 
+        # Test fluent .loop() on Clip and Scene
+        clip_loop = fade.loop()
+        self.assertEqual(clip_loop.duration, inf)
+
+        from my_rig import PARS
+        scene = PARS(fade)
+        self.assertEqual(scene.duration, 2.0)
+
+        scene_inf1 = scene * inf
+        self.assertEqual(scene_inf1.duration, inf)
+        self.assertEqual(scene_inf1.eval_canvas(1.0).to_dmx_list(10)[3], 128)
+        self.assertEqual(scene_inf1.eval_canvas(3.0).to_dmx_list(10)[3], 128)
+
+        scene_loop = scene.loop()
+        self.assertEqual(scene_loop.duration, inf)
+        self.assertEqual(scene_loop.eval_canvas(5.0).to_dmx_list(10)[3], 128)
+
+        scene_loop4 = scene.loop(4)
+        self.assertEqual(scene_loop4.duration, 8.0)
+
     def test_cct_and_color_temperature(self) -> None:
         from lightshow import CCT, FadeCCT, kelvin_to_ww_cw
         from my_rig import STROBE_BAR, create_rig

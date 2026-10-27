@@ -44,6 +44,13 @@ class TestJupyterIntegration(unittest.TestCase):
 
         s = stream(PARS(Hold(Color.RED, duration=1.0)), rig=rig)
         self.assertTrue(s.is_alive)
+        self.assertTrue(s.loop)
+
+        # Test automatic modulo looping when loop=True
+        self.assertAlmostEqual(s._eval_time(now=2.5, start=0.0, scene=s._current_scene), 0.5)
+        s.loop = False
+        self.assertAlmostEqual(s._eval_time(now=2.5, start=0.0, scene=s._current_scene), 2.5)
+        s.loop = True
 
         # Hot-swap
         s.update(PARS(Hold(Color.GREEN, duration=1.0)))
@@ -393,13 +400,20 @@ class TestJupyterIntegration(unittest.TestCase):
             deck.multiply_bpm(2.0)
             self.assertEqual(deck.bpm, 140.0)
 
-            # 7. Grand Master & Blackout
+            # 7. Grand Master & Blackout & Looping
             deck.set_master(0.65)
             self.assertAlmostEqual(deck.master, 0.65)
             self.assertTrue(deck.toggle_blackout())
             self.assertTrue(deck.is_blackout)
             self.assertFalse(deck.toggle_blackout())
             self.assertFalse(deck.is_blackout)
+
+            # Loop controls
+            self.assertTrue(deck.loop)
+            self.assertFalse(deck.toggle_loop())
+            self.assertFalse(deck.loop)
+            self.assertTrue(deck.toggle_loop())
+            self.assertTrue(deck.loop)
 
             # 8. Dynamic Scene Addition
             s4 = PARS(Hold(Color.WHITE, duration=1.0))
