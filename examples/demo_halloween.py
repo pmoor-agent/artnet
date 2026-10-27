@@ -19,6 +19,11 @@ Structure (32.0s loop):
     - Full-rig rolling lightning storm with all PARs and Strobe Bar strobing at 100% full blast
 """
 
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from lightshow import (
     Blackout,
     Chase,

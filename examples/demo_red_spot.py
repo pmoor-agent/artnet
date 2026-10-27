@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Minimalist bouncing spot that fades all the way to black and slowly shifts rainbow hue over ~8 bounces."""
 
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from lightshow import Pulse, Rainbow, inf
 from my_rig import PARS, run_show_cli
 

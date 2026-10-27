@@ -8,7 +8,12 @@ Showcases 5 distinct musical/lighting movements:
   5. [24.0s - 30.0s] Peak Time Drop & Finale: Staccato beat hits, high-speed chases & warm candle fade
 """
 
+
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lightshow import (
     Color,
     Chase,

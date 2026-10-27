@@ -1,7 +1,7 @@
 """Unit tests for the 16-PAR Disco Extravaganza demo show."""
 
 import unittest
-from demo_disco_16par import STAGE_16, DISCO_SHOW, PARS, ROW_TOP, ROW_BOT
+from examples.demo_disco_16par import STAGE_16, DISCO_SHOW, PARS, ROW_TOP, ROW_BOT
 
 
 class TestDemoDisco16Par(unittest.TestCase):

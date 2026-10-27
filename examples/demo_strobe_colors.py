@@ -16,6 +16,11 @@ Tests if Channel 21 (Master Strobe) modulates the RGB segments:
     - Strobe pulsing at a crisp medium-fast rate (60% / ~14 Hz)
 """
 
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import argparse
 from lightshow import (
     Color,

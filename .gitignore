@@ -8,4 +8,4 @@ venv/
 *.svg
 *.gif
 !docs/images/*.svg
-!docs/images/*.gif
+!examples/*.svg

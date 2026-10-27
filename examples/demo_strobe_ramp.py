@@ -4,6 +4,11 @@
 - Hardware Master Strobe (Channel 21 / DMX 52) ramps smoothly up (0-10s) and down (10-20s)
 """
 
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import argparse
 from lightshow import Color, Ease, Fade, Hold, inf
 from my_rig import PARS, STROBE_BAR, STROBE_MASTER, create_rig

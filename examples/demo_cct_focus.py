@@ -10,6 +10,11 @@ Steps (39 seconds total):
   6. [33-39s] Master Strobe (Ch 21): 3s slow strobe on Warm White, 3s fast strobe on Cold White
 """
 
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from lightshow import (
     Blackout,
     Color,

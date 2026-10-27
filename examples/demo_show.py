@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Demo 1: Composable animations across 4 RGBW PARs + Segmented LED Strobe."""
 
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from lightshow import (
     Blackout,
     Chase,

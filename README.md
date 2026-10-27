@@ -83,11 +83,10 @@ STAGE = Stage(
 
 ---
 
-## Documentation
+## Documentation & Examples
 
-For a comprehensive walkthrough of the DSL syntax, operator algebra, modulation LFOs, and hardware channel rules, see:
-
-📖 **[Lightshow DSL Guide & Language Reference](docs/language_guide.md)**
+- 📖 **[Lightshow DSL Guide & Language Reference](docs/language_guide.md)**: Comprehensive walkthrough of the DSL syntax, operator algebra, modulation LFOs, and hardware channel rules.
+- 💡 **[Example Shows & Previews](examples/README.md)**: Complete runnable shows with accompanying animated SVG previews in the [`examples/`](examples/) directory.
 
 ---
 

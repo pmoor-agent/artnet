@@ -11,6 +11,11 @@ We also support the alternate interpretation where "flicker at 40 Hz" means a fu
 which would require an 80 Hz DMX rate; via CLI --fps you can test higher transmitter rates.
 """
 
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from lightshow import Blackout, Color, Hold, inf
 from my_rig import PARS, run_show_cli
 
