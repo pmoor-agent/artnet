@@ -476,6 +476,20 @@ class TestLightshow(unittest.TestCase):
         scene_rep = PARS_16(Chase(Color.PURPLE, step_duration=1.0) * 2)
         self.assertEqual(scene_rep.duration, 32.0)
 
+        # 8. Shared clip instance across multiple sliced groups is immutable and cannot cross-pollute
+        shared_clip = Chase(Color.YELLOW, step_duration=1.0)
+        s1 = PARS_16[0:4](shared_clip)
+        s2 = PARS_16[4:12](shared_clip)
+        s3 = PARS_16[12:16](shared_clip)
+        self.assertEqual(s1.duration, 4.0)
+        self.assertEqual(s2.duration, 8.0)
+        self.assertEqual(s3.duration, 4.0)
+        self.assertIsNot(s1.clip, shared_clip)
+        self.assertIsNot(s2.clip, shared_clip)
+        self.assertIsNot(s3.clip, shared_clip)
+        self.assertEqual(shared_clip.duration, 4.0)
+        self.assertEqual((s1 | s2 | s3).duration, 8.0)
+
     def test_clip_and_scene_time_slicing(self) -> None:
         """Verify time slicing clip[start:stop] and scene[start:stop] with repeating."""
         from lightshow import Rainbow, SliceClip, SliceScene
