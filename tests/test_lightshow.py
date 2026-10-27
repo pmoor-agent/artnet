@@ -490,6 +490,48 @@ class TestLightshow(unittest.TestCase):
         self.assertEqual(shared_clip.duration, 4.0)
         self.assertEqual((s1 | s2 | s3).duration, 8.0)
 
+    def test_pulse_envelope_shaping(self) -> None:
+        """Verify Pulse lead/hold/tail envelope shaping and attack/decay aliases."""
+        from lightshow import Pulse, Ease
+
+        # 1. Fast attack and slow decay: lead=0.1, tail=0.9
+        p1 = Pulse(Color.WHITE, lead=0.1, tail=0.9, ease=Ease.linear)
+        self.assertEqual(p1.duration, 1.0)
+        self.assertAlmostEqual(p1.eval(0.0).color.r, 0.0, places=3)
+        self.assertAlmostEqual(p1.eval(0.05).color.r, 0.5, places=3)
+        self.assertAlmostEqual(p1.eval(0.10).color.r, 1.0, places=3)  # Peak at 0.1s
+        self.assertAlmostEqual(p1.eval(0.55).color.r, 0.5, places=3)  # Halfway decay
+        self.assertAlmostEqual(p1.eval(1.00).color.r, 0.0, places=3)
+
+        # 2. Hold at peak: lead=0.1, hold=0.2, tail=0.3
+        p2 = Pulse(Color.WHITE, lead=0.1, hold=0.2, tail=0.3, ease=Ease.linear)
+        self.assertAlmostEqual(p2.duration, 0.6, places=4)
+        self.assertAlmostEqual(p2.eval(0.10).color.r, 1.0, places=3)  # Peak arrival
+        self.assertAlmostEqual(p2.eval(0.20).color.r, 1.0, places=3)  # Middle of hold
+        self.assertAlmostEqual(p2.eval(0.30).color.r, 1.0, places=3)  # End of hold
+        self.assertAlmostEqual(p2.eval(0.45).color.r, 0.5, places=3)  # Halfway decay
+        self.assertAlmostEqual(p2.eval(0.60).color.r, 0.0, places=3)
+
+        # 3. Instant hit with decay: lead=0.0, tail=0.4
+        p3 = Pulse(Color.WHITE, lead=0.0, tail=0.4, ease=Ease.linear)
+        self.assertEqual(p3.duration, 0.4)
+        self.assertAlmostEqual(p3.eval(0.00).color.r, 1.0, places=3)  # Instant hit
+        self.assertAlmostEqual(p3.eval(0.20).color.r, 0.5, places=3)
+        self.assertAlmostEqual(p3.eval(0.40).color.r, 0.0, places=3)
+
+        # 4. Attack / Decay aliases
+        p4 = Pulse(Color.WHITE, attack=0.05, decay=0.45)
+        self.assertAlmostEqual(p4.duration, 0.5, places=4)
+        self.assertEqual(p4.lead, 0.05)
+        self.assertEqual(p4.tail, 0.45)
+
+        # 5. Proportional split with explicit duration: duration=2.0, hold=0.5
+        p5 = Pulse(Color.WHITE, duration=2.0, hold=0.5)
+        self.assertEqual(p5.duration, 2.0)
+        self.assertEqual(p5.hold, 0.5)
+        self.assertAlmostEqual(p5.lead, 0.75, places=4)
+        self.assertAlmostEqual(p5.tail, 0.75, places=4)
+
     def test_clip_and_scene_time_slicing(self) -> None:
         """Verify time slicing clip[start:stop] and scene[start:stop] with repeating."""
         from lightshow import Rainbow, SliceClip, SliceScene

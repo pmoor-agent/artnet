@@ -811,29 +811,80 @@ class Fade(Clip):
 
 
 class Pulse(Clip):
-    """Fade from `low` to `high` and back to `low` over `duration` seconds."""
+    """Fade from `low` to `high` and back to `low` over `duration` seconds (with customizable envelope)."""
 
     def __init__(
         self,
         color_or_peak: Union[Color, float] = 1.0,
-        duration: float = 1.0,
+        duration: Optional[float] = None,
         *,
         low: float = 0.0,
         high: float = 1.0,
+        lead: Optional[float] = None,
+        hold: float = 0.0,
+        tail: Optional[float] = None,
+        attack: Optional[float] = None,
+        decay: Optional[float] = None,
         channel: str = "value",
         ease: Callable[[float], float] = Ease.in_out_sine,
     ) -> None:
         self.color_or_peak = color_or_peak
-        self.duration = float(duration)
         self.low = low
         self.high = high
         self.channel = channel
         self.ease_fn = ease
 
+        # Resolve aliases: lead/attack, tail/decay
+        eff_lead = attack if lead is None else lead
+        eff_tail = decay if tail is None else tail
+        self.hold = max(0.0, float(hold))
+
+        if duration is None:
+            if eff_lead is None and eff_tail is None:
+                self.duration = 1.0
+                t_hold = min(self.duration, self.hold)
+                rem = max(0.0, self.duration - t_hold)
+                self.lead = rem / 2.0
+                self.tail = rem / 2.0
+            else:
+                self.lead = max(0.0, float(eff_lead or 0.0))
+                self.tail = max(0.0, float(eff_tail or 0.0))
+                self.duration = self.lead + self.hold + self.tail
+        else:
+            self.duration = max(0.0, float(duration))
+            t_hold = min(self.duration, self.hold)
+            rem = max(0.0, self.duration - t_hold)
+            if eff_lead is None and eff_tail is None:
+                self.lead = rem / 2.0
+                self.tail = rem / 2.0
+            elif eff_lead is not None and eff_tail is None:
+                self.lead = min(rem, max(0.0, float(eff_lead)))
+                self.tail = max(0.0, rem - self.lead)
+            elif eff_lead is None and eff_tail is not None:
+                self.tail = min(rem, max(0.0, float(eff_tail)))
+                self.lead = max(0.0, rem - self.tail)
+            else:
+                self.lead = max(0.0, float(eff_lead))
+                self.tail = max(0.0, float(eff_tail))
+
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
-        u = 0.0 if self.duration <= 0 else max(0.0, min(1.0, t / self.duration))
-        tri = 1.0 - abs(2.0 * u - 1.0)
-        level = self.low + (self.high - self.low) * self.ease_fn(tri)
+        if self.duration <= 0:
+            level = self.high
+        elif t < 0.0 or t >= self.duration:
+            level = self.low
+        elif self.lead > 0.0 and t < self.lead:
+            u = t / self.lead
+            level = self.low + (self.high - self.low) * self.ease_fn(u)
+        elif t <= (self.lead + self.hold):
+            level = self.high
+        else:
+            decay_elapsed = t - (self.lead + self.hold)
+            if self.tail <= 0.0:
+                level = self.low
+            else:
+                u = min(1.0, max(0.0, decay_elapsed / self.tail))
+                level = self.low + (self.high - self.low) * self.ease_fn(1.0 - u)
+
         if isinstance(self.color_or_peak, Color):
             return Patch(color=self.color_or_peak * level)
         return Patch.from_channel(self.channel, float(self.color_or_peak) * level)

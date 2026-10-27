@@ -65,11 +65,13 @@ A `Clip` represents a time-varying light pattern independent of physical hardwar
   Fade(Color.BLUE, Color.MAGENTA, duration=2.0, ease=Ease.in_out_sine)
   ```
 
-- **`Pulse(color, duration=1.0, low=0.0, high=1.0, ease=Ease.in_out_sine)`**:
-  Breathing effect: swells up from `low` to `high` and decays back down.
+- **`Pulse(color, duration=None, lead=None, hold=0.0, tail=None, low=0.0, high=1.0, ease=Ease.in_out_sine)`**:
+  Breathing effect or shaped envelope flash. Supports customizable `lead` (ramp up / attack), `hold` (peak sustain), and `tail` (fade out / decay) durations in seconds:
   ```python
-  Pulse(Color.CYAN, duration=1.0)
-  Pulse(Color.WHITE, high=0.6, duration=0.5)  # Soft flash
+  Pulse(Color.CYAN, duration=1.0)                        # Classic symmetric pulse (0.5s up, 0.5s down)
+  Pulse(Color.WHITE, lead=0.05, tail=0.45)               # Snappy beat hit: 50ms attack, 450ms decay
+  Pulse(Color.AMBER, lead=0.1, hold=0.2, tail=0.4)       # Plateau flash: 0.1s rise, 0.2s hold, 0.4s fade
+  Pulse(Color.RED, lead=0.0, tail=0.3)                   # Instant flash and fade
   ```
 
 - **`Rainbow(duration=4.0)`**:
