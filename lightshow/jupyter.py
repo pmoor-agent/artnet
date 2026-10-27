@@ -47,6 +47,19 @@ from lightshow.inspector import parse_width
 from .deck import ControlDeck
 
 
+def enable_deck_logging(level: int = 20) -> None:  # logging.INFO = 20
+    """Enable verbose kernel-side logging for ControlDeck and LiveStream in Jupyter."""
+    import logging
+    deck_logger = logging.getLogger("lightshow.deck")
+    deck_logger.setLevel(level)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(level)
+    formatter = logging.Formatter("[%(asctime)s] [Deck] %(message)s", datefmt="%H:%M:%S")
+    handler.setFormatter(formatter)
+    deck_logger.addHandler(handler)
+    deck_logger.info("Kernel logging enabled for ControlDeck.")
+
+
 # =============================================================================
 # SVG Timeline Visualizer (Zero-dependency pure-Python string generation)
 # =============================================================================
@@ -690,6 +703,7 @@ def stop_stream() -> None:
 __all__ = list(lightshow.__all__) + [
     "COOL_WHITE_RGB",
     "ControlDeck",
+    "enable_deck_logging",
     "DMXFrameView",
     "EuroliteBCL40Bar",
     "EurolitePartySpot",

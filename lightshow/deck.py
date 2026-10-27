@@ -12,7 +12,10 @@ Provides a hardware-console style interface to control live background streaming
 from __future__ import annotations
 from collections import OrderedDict
 import html
+import logging
 import math
+import os
+import sys
 import threading
 import time
 from typing import Any, Mapping, Optional, Sequence, Union
@@ -22,13 +25,29 @@ from .clips import Clip
 from .fixtures import Scene
 from .tempo import Tempo
 
-try:
+logger = logging.getLogger("lightshow.deck")
+
+
+def _check_ipywidgets() -> tuple[bool, Optional[str]]:
+    """Check if ipywidgets is importable and functional in the active kernel."""
+    # Ensure user site-packages is in sys.path even if process was started before install
+    user_site = os.path.expanduser(f"~/.local/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages")
+    if os.path.exists(user_site) and user_site not in sys.path:
+        sys.path.insert(0, user_site)
+
+    try:
+        import ipywidgets as _widgets
+        return True, getattr(_widgets, "__version__", "unknown")
+    except Exception as e:
+        return False, str(e)
+
+
+# Initial check at import time
+HAS_IPYWIDGETS, IPYWIDGETS_VERSION = _check_ipywidgets()
+if HAS_IPYWIDGETS:
     import ipywidgets as widgets
-    from IPython.display import display
-    HAS_IPYWIDGETS = True
-except ImportError:
+else:
     widgets = None  # type: ignore
-    HAS_IPYWIDGETS = False
 
 
 class ControlDeck:
@@ -62,12 +81,15 @@ class ControlDeck:
         transition_time: float = 1.0,
         master: float = 1.0,
         autoplay: bool = False,
+        verbose: bool = False,
         host: str = "192.168.1.158",
         universe: int = 1,
     ) -> None:
         self.rig = rig or Rig(host=host, universe=universe, fps=fps)
         self.fps = fps
         self.transition_time = max(0.0, float(transition_time))
+        self.verbose = verbose
+        self.history: list[tuple[float, str]] = []
 
         # Normalize scenes into an OrderedDict[str, Scene]
         self._scenes: OrderedDict[str, Scene] = OrderedDict()
@@ -117,11 +139,27 @@ class ControlDeck:
             self.streamer.pause()
             self.streamer.start()
 
+        # Check ipywidgets dynamically in active kernel
+        has_widgets, version = _check_ipywidgets()
+        self._ipywidgets_available = has_widgets
+        self._ipywidgets_version = version
+
         # UI Widget components
         self._widget: Optional[Any] = None
         self._ui_elements: dict[str, Any] = {}
-        if HAS_IPYWIDGETS:
+        if self._ipywidgets_available:
+            global widgets
+            if widgets is None:
+                import ipywidgets as _w
+                widgets = _w
             self._build_widget()
+            self.log(f"Initialized ControlDeck with {len(self._scenes)} scenes (ipywidgets {version} active).")
+        else:
+            self.log(f"Initialized ControlDeck with {len(self._scenes)} scenes (ipywidgets unavailable: {version}).")
+            if not self.verbose:
+                # Print clean kernel diagnostic notice
+                print(f"[ControlDeck] Notice: ipywidgets is not active in this kernel session ({version}).")
+                print(f"[ControlDeck] Displaying static HTML preview. To enable interactive buttons: Kernel -> Restart Kernel, then re-run.")
 
     # =========================================================================
     # Properties
@@ -182,6 +220,26 @@ class ControlDeck:
         """The top-level `ipywidgets.VBox` GUI container, or None if ipywidgets is not installed."""
         return self._widget
 
+    def log(self, message: str) -> None:
+        """Log a message to the logger, console (if verbose), and internal history."""
+        now_str = time.strftime("%H:%M:%S")
+        formatted = f"[{now_str}] [ControlDeck] {message}"
+        logger.info(message)
+        self.history.append((time.monotonic(), formatted))
+        if len(self.history) > 100:
+            self.history.pop(0)
+        if self.verbose:
+            print(formatted)
+        if hasattr(self, "_ui_elements") and "log_html" in self._ui_elements:
+            self._ui_elements["log_html"].value = self._render_log_html()
+
+    def enable_logging(self, level: int = logging.INFO) -> ControlDeck:
+        """Enable verbose printing of all deck events directly to the notebook cell output."""
+        self.verbose = True
+        logger.setLevel(level)
+        self.log("Verbose kernel logging enabled.")
+        return self
+
     # =========================================================================
     # Transport Controls
     # =========================================================================
@@ -189,11 +247,13 @@ class ControlDeck:
     def play(self) -> None:
         """Start or resume live streaming."""
         self.streamer.resume()
+        self.log(f"▶ PLAY: Live streaming active ({self.fps:g} Hz)")
         self._sync_ui()
 
     def pause(self) -> None:
         """Pause live streaming without dropping DMX frame clock."""
         self.streamer.pause()
+        self.log("⏸ PAUSE: Playback paused")
         self._sync_ui()
 
     def toggle_play(self) -> None:
@@ -206,27 +266,32 @@ class ControlDeck:
     def stop(self) -> None:
         """Stop background streaming and blackout the rig."""
         self.streamer.stop()
+        self.log("⏹ STOP: Streaming thread terminated and rig blacked out")
         self._sync_ui()
 
     def blackout(self) -> None:
         """Engage immediate master blackout."""
         self.streamer.set_blackout(True)
+        self.log("⚡ BLACKOUT: Active")
         self._sync_ui()
 
     def toggle_blackout(self) -> bool:
         """Toggle master blackout without stopping playback. Returns True if now blacked out."""
         active = self.streamer.toggle_blackout()
+        self.log(f"⚡ BLACKOUT: {'ACTIVE' if active else 'OFF'}")
         self._sync_ui()
         return active
 
     def set_blackout(self, active: bool) -> None:
         """Set master blackout state."""
         self.streamer.set_blackout(active)
+        self.log(f"⚡ BLACKOUT: {'ACTIVE' if active else 'OFF'}")
         self._sync_ui()
 
     def set_master(self, level: float) -> None:
         """Set grand master intensity in [0.0, 1.0]."""
         self.streamer.set_master(level)
+        self.log(f"🔆 MASTER: Set to {int(round(self.master * 100))}%")
         self._sync_ui()
 
     # =========================================================================
@@ -238,12 +303,14 @@ class ControlDeck:
         key = self._resolve_key(name_or_index)
         self._active_key = key
         self.streamer.update(self._scenes[key])
+        self.log(f"⚡ SELECT (CUT): Switched active scene to {key!r}")
         self._sync_ui()
 
     def cue(self, name_or_index: Union[str, int]) -> None:
         """Set the cued next scene without affecting the live output."""
         key = self._resolve_key(name_or_index)
         self._cue_key = key
+        self.log(f"🟡 CUE: Queued next scene -> {key!r}")
         self._sync_ui()
 
     def transition_to(self, name_or_index: Union[str, int], duration: Optional[float] = None) -> None:
@@ -252,6 +319,7 @@ class ControlDeck:
         self._active_key = key
         dur = self.transition_time if duration is None else max(0.0, float(duration))
         self.streamer.transition_to(self._scenes[key], duration=dur)
+        self.log(f"⇄ TRANSITION: Crossfading to {key!r} over {dur:.1f}s")
         self._sync_ui()
 
     def go(self, duration: Optional[float] = None) -> None:
@@ -265,6 +333,7 @@ class ControlDeck:
         idx = keys.index(target_key)
         next_idx = (idx + 1) % len(keys)
         self._cue_key = keys[next_idx]
+        self.log(f"⇄ GO: Crossfaded to {target_key!r}, cued next -> {self._cue_key!r}")
         self._sync_ui()
 
     def cut(self) -> None:
@@ -275,6 +344,7 @@ class ControlDeck:
         idx = keys.index(target_key)
         next_idx = (idx + 1) % len(keys)
         self._cue_key = keys[next_idx]
+        self.log(f"⚡ CUT: Cut to {target_key!r}, cued next -> {self._cue_key!r}")
         self._sync_ui()
 
     def next(self, fade: bool = False) -> None:
@@ -306,6 +376,7 @@ class ControlDeck:
             opts = list(self._scenes.keys())
             self._ui_elements["active_dropdown"].options = opts
             self._ui_elements["cue_dropdown"].options = opts
+        self.log(f"➕ ADD: Registered scene {key!r} ({self._scenes[key].duration:.2f}s)")
         self._sync_ui()
 
     # =========================================================================
@@ -316,12 +387,14 @@ class ControlDeck:
         """Set tempo in BPM."""
         self.tempo.bpm = max(20.0, min(300.0, float(bpm)))
         self.streamer.set_bpm(self.tempo.bpm)
+        self.log(f"🎵 BPM: Updated to {self.tempo.bpm:g} BPM (1 Beat = {60.0/self.tempo.bpm:.3f}s)")
         self._sync_ui()
 
     def tap(self) -> float:
         """Record a tap and update tempo."""
         new_bpm = self.tempo.tap()
         self.streamer.set_bpm(new_bpm)
+        self.log(f"🥁 TAP: Recorded tap -> Tempo is now {new_bpm:g} BPM")
         self._sync_ui()
         return new_bpm
 
@@ -565,6 +638,10 @@ class ControlDeck:
         telemetry_html = widgets.HTML(self._render_telemetry_html())
         self._ui_elements["telemetry_html"] = telemetry_html
 
+        # 6. Live Kernel Log Card
+        log_html = widgets.HTML(self._render_log_html())
+        self._ui_elements["log_html"] = log_html
+
         # Connect Callbacks
         def _on_active_change(change):
             if change["name"] == "value" and change["new"] in self._scenes:
@@ -618,6 +695,7 @@ class ControlDeck:
             control_row,
             tempo_row,
             telemetry_html,
+            log_html,
         ], layout=widgets.Layout(width="100%"))
         self._widget.add_class("artnet-deck-container")
 
@@ -632,6 +710,8 @@ class ControlDeck:
             elems["header_html"].value = self._render_header_html()
         if "telemetry_html" in elems:
             elems["telemetry_html"].value = self._render_telemetry_html()
+        if "log_html" in elems:
+            elems["log_html"].value = self._render_log_html()
 
         # Dropdowns
         if "active_dropdown" in elems and elems["active_dropdown"].value != self._active_key:
@@ -656,6 +736,21 @@ class ControlDeck:
                 elems["blackout_btn"].description = "⚡ Blackout"
                 elems["blackout_btn"].button_style = ""
 
+    def _render_log_html(self) -> str:
+        """Render recent kernel log lines into an HTML card."""
+        recent = self.history[-4:] if self.history else [(time.monotonic(), "[ControlDeck] Ready.")]
+        lines = "<br>".join(
+            f"<span style='color: #64748b;'>{html.escape(item[1][:10])}</span> "
+            f"<span style='color: #cbd5e1;'>{html.escape(item[1][10:])}</span>"
+            for item in recent
+        )
+        return f"""
+        <div style="background: #06090e; border: 1px solid #1e293b; border-radius: 6px; padding: 6px 10px; font-family: monospace; font-size: 11px; line-height: 1.4; margin-top: 6px;">
+            <div style="color: #64748b; font-size: 10px; font-weight: 600; text-transform: uppercase; margin-bottom: 2px;">Kernel Log</div>
+            {lines}
+        </div>
+        """
+
     def _render_header_html(self) -> str:
         """Render the status header HTML snippet."""
         if self.is_blackout:
@@ -669,7 +764,6 @@ class ControlDeck:
 
         host = self.rig.client.host
         univ = self.rig.client.universe
-        dur_str = f"{self.current_scene.duration:.2f}s" if not math.isinf(self.current_scene.duration) else "∞ (loop)"
 
         return f"""
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; border-bottom: 1px solid #1e293b; padding-bottom: 10px;">
@@ -688,7 +782,6 @@ class ControlDeck:
     def _render_telemetry_html(self) -> str:
         """Render the telemetry status panel HTML snippet."""
         beat_dur = 60.0 / self.tempo.bpm
-        bar_dur = beat_dur * 4.0
         packets = getattr(self.streamer, "_packets_sent", 0)
 
         trans_status = "Idle"
@@ -703,7 +796,7 @@ class ControlDeck:
                 <strong>Trans:</strong> {trans_status}
             </div>
             <div>
-                1 Beat = {beat_dur:.3f}s &nbsp;|&nbsp; Packets Sent: {packets:,}
+                1 Beat = {beat_dur:.3f}s &nbsp;|&nbsp; Packets: {packets:,}
             </div>
         </div>
         """
@@ -731,36 +824,85 @@ class ControlDeck:
 
     def _repr_html_(self) -> str:
         """Fallback HTML representation if ipywidgets is unavailable."""
-        scene_rows = "".join(
-            f"<tr><td style='padding: 4px 8px; color: {'#34d399' if k == self._active_key else '#e2e8f0'};'>{'▶ ' if k == self._active_key else ''}{html.escape(k)}</td>"
-            f"<td style='padding: 4px 8px; color: #94a3b8;'>{s.duration:.2f}s" if not math.isinf(s.duration) else "<td style='padding: 4px 8px; color: #94a3b8;'>∞ (loop)</td></tr>"
-            for k, s in self._scenes.items()
-        )
+        rows = []
+        for k, s in self._scenes.items():
+            is_active = (k == self._active_key)
+            is_cue = (k == self._cue_key)
+            status_tag = ""
+            if is_active:
+                status_tag = "<span style='background: #064e3b; color: #34d399; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-right: 8px;'>LIVE</span>"
+            elif is_cue:
+                status_tag = "<span style='background: #78350f; color: #fcd34d; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-right: 8px;'>CUE</span>"
+
+            dur_str = f"{s.duration:.2f}s" if not math.isinf(s.duration) else "∞ (loop)"
+            name_color = "#34d399" if is_active else "#f8fafc"
+            row_bg = "#1e293b" if is_active else "#0f172a"
+
+            rows.append(
+                f"<tr style='background: {row_bg} !important; border-bottom: 1px solid #334155;'>"
+                f"<td style='padding: 8px 12px; color: {name_color} !important; font-weight: 600; font-family: system-ui, sans-serif;'>{status_tag}{html.escape(k)}</td>"
+                f"<td style='padding: 8px 12px; color: #94a3b8 !important; font-family: monospace;'>{dur_str}</td>"
+                f"</tr>"
+            )
+        scene_rows = "".join(rows)
+
         status_text = "STREAMING" if self.is_playing else ("PAUSED" if self.is_paused else "STOPPED")
         status_color = "#22c55e" if self.is_playing else ("#eab308" if self.is_paused else "#64748b")
 
-        return f"""
-        <div style="font-family: system-ui, sans-serif; background: #0b0f17; border: 1px solid #1e293b; border-radius: 8px; padding: 14px; max-width: 600px; color: #f8fafc; margin: 8px 0;">
-            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #1e293b; padding-bottom: 8px; margin-bottom: 8px;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="width: 10px; height: 10px; border-radius: 50%; background: {status_color}; display: inline-block;"></span>
-                    <strong style="font-size: 13px;">CONTROL DECK: {status_text}</strong>
-                </div>
-                <span style="font-size: 12px; color: #38bdf8; font-weight: 600;">{self.tempo.bpm:g} BPM</span>
+        recent_logs = "<br>".join(
+            f"<span style='color: #64748b;'>{html.escape(h[1][:10])}</span> <span style='color: #cbd5e1;'>{html.escape(h[1][10:])}</span>"
+            for h in (self.history[-3:] if self.history else [(0, "[ControlDeck] Ready.")])
+        )
+
+        gui_hint = ""
+        if not self._ipywidgets_available:
+            gui_hint = f"""
+            <div style="background: #1e1b4b !important; border: 1px solid #4338ca; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; font-size: 12px; color: #c7d2fe !important; line-height: 1.5;">
+                <div style="font-weight: 700; color: #a5b4fc !important; margin-bottom: 4px;">💡 Pushable Buttons & Sliders (ipywidgets)</div>
+                Interactive buttons require <code>ipywidgets</code> in the kernel. In this session: <em>{html.escape(str(self._ipywidgets_version))}</em>.<br>
+                To enable the full interactive DJ/VJ buttons and sliders:
+                <ol style="margin: 4px 0 2px 18px; padding: 0;">
+                    <li>Restart your Jupyter kernel (<strong>Kernel &rarr; Restart Kernel</strong>)</li>
+                    <li>Re-run this cell</li>
+                </ol>
             </div>
-            <table style="width: 100%; font-size: 12px; border-collapse: collapse; margin: 8px 0;">
+            """
+
+        return f"""
+        <div style="font-family: system-ui, sans-serif; background: #0b0f17 !important; border: 1px solid #1e293b; border-radius: 10px; padding: 16px; max-width: 650px; color: #f8fafc !important; margin: 10px 0; box-shadow: 0 8px 20px rgba(0,0,0,0.5);">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #1e293b; padding-bottom: 10px; margin-bottom: 10px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 18px;">🎛️</span>
+                    <strong style="font-size: 14px; letter-spacing: 0.5px;">CONTROL DECK:</strong>
+                    <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: {status_color}22; color: {status_color}; border: 1px solid {status_color}55;">
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: {status_color};"></span>
+                        {status_text}
+                    </span>
+                </div>
+                <span style="font-size: 12px; color: #38bdf8; font-weight: 600; font-family: monospace;">{self.tempo.bpm:g} BPM</span>
+            </div>
+
+            {gui_hint}
+
+            <table style="width: 100% !important; background: #0f172a !important; font-size: 12px; border-collapse: collapse; margin: 8px 0; border: 1px solid #1e293b; border-radius: 6px; overflow: hidden;">
                 <thead>
-                    <tr style="border-bottom: 1px solid #334155; text-align: left; color: #94a3b8;">
-                        <th style="padding: 4px 8px;">Scene Name</th>
-                        <th style="padding: 4px 8px;">Duration</th>
+                    <tr style="background: #111827 !important; border-bottom: 1px solid #334155; text-align: left; color: #94a3b8 !important;">
+                        <th style="padding: 8px 12px; font-weight: 600;">Scene Name</th>
+                        <th style="padding: 8px 12px; font-weight: 600;">Duration</th>
                     </tr>
                 </thead>
                 <tbody>
                     {scene_rows}
                 </tbody>
             </table>
-            <div style="font-size: 11px; color: #94a3b8; margin-top: 6px;">
-                Programmatic control: <code>deck.play()</code>, <code>deck.next()</code>, <code>deck.go()</code>, <code>deck.set_bpm({self.tempo.bpm:g})</code>.
+
+            <div style="background: #06090e !important; border: 1px solid #1e293b; border-radius: 6px; padding: 8px 12px; font-family: monospace; font-size: 11px; line-height: 1.4; margin-top: 10px;">
+                <div style="color: #64748b; font-size: 10px; font-weight: 600; text-transform: uppercase; margin-bottom: 3px;">Kernel Log</div>
+                {recent_logs}
+            </div>
+
+            <div style="font-size: 11px; color: #94a3b8; margin-top: 10px;">
+                <strong>Python Control:</strong> <code>deck.play()</code> &nbsp;|&nbsp; <code>deck.next()</code> &nbsp;|&nbsp; <code>deck.go()</code> &nbsp;|&nbsp; <code>deck.set_bpm({self.tempo.bpm:g})</code>
             </div>
         </div>
         """

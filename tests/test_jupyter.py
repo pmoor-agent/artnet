@@ -417,10 +417,17 @@ class TestJupyterIntegration(unittest.TestCase):
             pause_btn._click_handlers(pause_btn)
             self.assertTrue(deck.is_paused)
 
-            # HTML repr fallback
+            # 10. Kernel logging & history
+            self.assertTrue(len(deck.history) >= 5)
+            self.assertTrue(any("PLAY" in msg for _, msg in deck.history))
+
+            # HTML repr fallback and table styling
             html_repr = deck._repr_html_()
             self.assertIn("CONTROL DECK:", html_repr)
             self.assertIn("Red PARs", html_repr)
+            self.assertIn("White PARs", html_repr)
+            self.assertIn("!important", html_repr)
+            self.assertIn("</td></tr>", html_repr)
         finally:
             deck.stop()
 
