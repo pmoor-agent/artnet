@@ -40,6 +40,9 @@ With this rig defined:
 - `PARS(clip)` binds any clip or animation to all 8 PARs.
 - `STAGE.render_svg(scene, t=1.0)` renders the virtual stage at time $t$.
 - In Jupyter, typing `scene` or `STAGE(scene, t=1.0)` renders an immediate visual preview, and `STAGE.inspect(scene)` provides an interactive scrubber widget.
+- `STAGE.render_animated_svg(scene, fps=15.0)` renders a self-contained animated vector SVG with native W3C SMIL animation.
+- `STAGE.save_animated_svg(scene, "show.svg", fps=15.0)` exports an animated SVG file that plays directly in browsers, markdown, and image viewers.
+- `STAGE.save_animated_gif(scene, "show.gif", fps=15.0)` exports an optimized animated GIF using Inkscape and ffmpeg.
 
 ---
 
@@ -101,7 +104,7 @@ scene = PARS(
 )
 ```
 
-![Basic Clips: Fade, Pulse, Hold](./images/01_basics_fade_pulse.gif)
+![Basic Clips: Fade, Pulse, Hold](./images/01_basics_fade_pulse.svg)
 
 ---
 
@@ -187,7 +190,7 @@ odds = (Pulse(Color.CYAN, duration=1.2) * 2).on(1, 3, 5, 7)
 scene = PARS(evens | odds)
 ```
 
-![Spatial Subsetting: Evens and Odds](./images/02_spatial_evens_odds.gif)
+![Spatial Subsetting: Evens and Odds](./images/02_spatial_evens_odds.svg)
 
 ### Fixture Slicing and Group Concatenation
 
@@ -230,7 +233,7 @@ unison = PARS(Rainbow(duration=2.4))
 wave = PARS(Rainbow(duration=2.4).spread())
 ```
 
-![Spatial Spread: Continuous Rainbow Wave](./images/03_rainbow_spread.gif)
+![Spatial Spread: Continuous Rainbow Wave](./images/03_rainbow_spread.svg)
 
 ### Marquee Chases (`Chase`)
 
@@ -249,7 +252,7 @@ chase = Chase(
 scene = PARS(chase @ 2.4)
 ```
 
-![Ping-Pong Marquee Chase with Tail](./images/04_chase_pingpong.gif)
+![Ping-Pong Marquee Chase with Tail](./images/04_chase_pingpong.svg)
 
 > [!NOTE]
 > **Spatial Envelope Parameters (`lead`, `hold`, `tail`)**:
@@ -373,7 +376,7 @@ lightning = Wait(3.0) >> (Hold(Color.WHITE, strobe=0.9, duration=0.25).on(2, 3, 
 halloween_show = PARS(flicker_wash) + PARS(lightning)
 ```
 
-![Halloween Torch & Candle Flicker](./images/06_halloween_flicker.gif)
+![Halloween Torch & Candle Flicker](./images/06_halloween_flicker.svg)
 
 ---
 
@@ -403,7 +406,7 @@ mini_show = PARS(
 )
 ```
 
-![Multi-Layer Mini Lightshow](./images/05_composition_show.gif)
+![Multi-Layer Mini Lightshow](./images/05_composition_show.svg)
 
 > [!TIP]
 > **Channel Independence & LTP Overrides**:

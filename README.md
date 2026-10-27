@@ -26,17 +26,17 @@ Traditional lighting control often suffers from imperative spaghetti code: manua
 ### Halloween Torch Flicker & Relative Hue Jitter
 Deep ember/blood-red gradient wash with independent per-fixture flame flicker, smooth organic hue jitter, and a cold lightning strike:
 
-![Halloween Torch Flicker](./docs/images/06_halloween_flicker.gif)
+![Halloween Torch Flicker](./docs/images/06_halloween_flicker.svg)
 
 ### Multi-Layer Composition
 An ambient moving gradient wave, rhythmic dimmer pulse, and synchronized strobe hits:
 
-![Multi-Layer Composition](./docs/images/05_composition_show.gif)
+![Multi-Layer Composition](./docs/images/05_composition_show.svg)
 
 ### Symmetric Ping-Pong Marquee Chase
 Boundary-aware linear chase with trailing decay and background ambient wash:
 
-![Symmetric Ping-Pong Chase](./docs/images/04_chase_pingpong.gif)
+![Symmetric Ping-Pong Chase](./docs/images/04_chase_pingpong.svg)
 
 ---
 
