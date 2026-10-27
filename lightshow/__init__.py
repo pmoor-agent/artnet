@@ -65,6 +65,11 @@ from .fixtures import (
     SliceScene,
     TimeScaleScene,
 )
+from .inspector import (
+    DMXFrameView,
+    dmx,
+    inspect_dmx,
+)
 from .state import Color, ParPatch, Patch
 from .tempo import (
     Abs,
@@ -100,6 +105,7 @@ __all__ = [
     "Clip",
     "Color",
     "DMXCanvas",
+    "DMXFrameView",
     "DimmerLFO",
     "Ease",
     "EnvelopeClip",
@@ -155,9 +161,11 @@ __all__ = [
     "build_artdmx_packet",
     "ch",
     "dim",
+    "dmx",
     "fbm_noise1d",
     "get_tempo",
     "inf",
+    "inspect_dmx",
     "kelvin_to_ww_cw",
     "sec",
     "seconds",

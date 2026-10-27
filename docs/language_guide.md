@@ -521,11 +521,47 @@ from lightshow.jupyter import *
 from my_rig import STAGE, PARS
 ```
 
-### Interactive Scrubber Widget
-Evaluate any scene in an interactive HTML5/JS slider to scrub time back and forth at full fidelity:
+### Interactive Scrubber Widget with Live DMX Inspector
+Evaluate any scene in an interactive HTML5/JS scrubber with frame-stepping buttons, slider, and synchronized live DMX frame table:
 
 ```python
+# Interactive scrubber with 2D stage visualizer, transport buttons, and live DMX table:
 STAGE.inspect(mini_show, duration=3.0, fps=15)
+
+# Or inspect any Scene directly without a pre-configured Stage:
+mini_show.inspect(duration=3.0, fps=15)
+```
+
+Controls:
+- `◀ Prev` and `Next ▶`: Step backward or forward by exactly 1 frame.
+- `▶ Play` / `⏸ Pause`: Real-time animated playback.
+- Slider: Scrub smoothly across the timeline.
+- **Live DMX Channel Table**: Updates synchronously on every frame:
+  - **RGB channels**: Accurately color-tinted with red, green, and blue glows and role badges.
+  - **White channels (`CW` / `WW`)**: Colored with cold white and warm amber glows.
+  - **Strobe & Utility channels**: Pitch black background (`#000000`) always, with vivid warning outlines when active.
+  - **Inactive `0` channels**: Faint and muted by default (`opacity: 0.38`), keeping the focus on active channels.
+  - **Zero Toggle (`Hide 0s`)**: Click to completely filter out inactive channels and collapse unlit fixtures.
+  - **Tab Switcher (`Fixtures` vs `Grid`)**: Switch instantly between fixture-grouped semantic cards and the classic 512-channel lighting console matrix.
+
+### DMX Snapshot Inspection
+To inspect raw DMX frame channel values at a specific timestamp:
+
+```python
+# Inspect snapshot at t = 0.50s from a Scene:
+scene.dmx(0.5)
+
+# Or inspect snapshot using physical fixture layout on a Stage:
+STAGE.dmx(scene, 0.5)
+
+# Filter out zero channels immediately:
+scene.dmx(0.5, hide_zeros=True)
+
+# Programmatic access to DMX bytes:
+view = scene.dmx(0.5)
+print(view.channel(1))       # DMX byte for Channel 1 (0..255)
+print(view.active_channels)  # [(1, 255), (5, 255), ...]
+print(view.summary())        # Formatted console text summary
 ```
 
 ### Background Streaming (Hot-Reloadable)
@@ -607,6 +643,8 @@ stop_stream()
 | `clip.flicker(depth, speed)` | Modulate with organic flame/candle flicker. Available on `Clip` and `Scene`. |
 | `clip.jitter_hue(amount, speed)` | Jitter hue smoothly in HSV space with organic noise. Available on `Clip` and `Scene`. |
 | `clip.shift_hsv(dh, ds, dv)` | Shift hue, saturation, and value relative to base color. Available on `Clip` and `Scene`. |
+| `scene.dmx(t=0.0)` | Inspect raw DMX frame and channel values at timestamp `t` with colored badges and faint 0s. |
+| `scene.inspect(...)` | Interactive scrubber with time slider, frame stepping (`◀ Prev` / `Next ▶`), and live DMX table. |
 | `clip.reverse()` | Invert playback direction (equivalent to `~clip`). |
 | `clip.mirror()` | Symmetrically reflect animation from center outward. |
 | `clip.loop(n=inf)` | Repeat clip $n$ times (default infinite). |

@@ -173,6 +173,22 @@ class DMXCanvas:
             dmx[addr - 1] = _to_dmx_byte(val, rng)
         return dmx
 
+    def dmx(
+        self,
+        *,
+        max_channel: Optional[int] = None,
+        hide_zeros: bool = False,
+        universe: int = 1,
+    ) -> Any:
+        """Inspect this DMXCanvas as a formatted DMX frame view."""
+        from .inspector import inspect_dmx
+        return inspect_dmx(
+            self,
+            max_channel=max_channel,
+            hide_zeros=hide_zeros,
+            universe=universe,
+        )
+
 
 # =============================================================================
 # FixtureGroup
@@ -557,6 +573,48 @@ class Scene:
 
     def scale(self, factor: float) -> ScaleScene:
         return ScaleScene(self, factor)
+
+    def dmx(
+        self,
+        t: float = 0.0,
+        *,
+        stage: Any = None,
+        max_channel: Optional[int] = None,
+        hide_zeros: bool = False,
+        universe: int = 1,
+    ) -> Any:
+        """Inspect the raw DMX frame and channel values at timestamp `t`."""
+        from .inspector import inspect_dmx
+        return inspect_dmx(
+            self,
+            t=t,
+            stage=stage,
+            max_channel=max_channel,
+            hide_zeros=hide_zeros,
+            universe=universe,
+        )
+
+    def inspect(
+        self,
+        *,
+        stage: Any = None,
+        duration: Optional[float] = None,
+        fps: float = 20.0,
+        show_dmx: bool = True,
+        max_channel: Optional[int] = None,
+        hide_zeros: bool = False,
+    ) -> Any:
+        """Interactive Jupyter widget with animated visualizer, transport controls, and live DMX table."""
+        from .inspector import render_interactive_inspector
+        return render_interactive_inspector(
+            self,
+            stage=stage,
+            duration=duration,
+            fps=fps,
+            show_dmx=show_dmx,
+            max_channel=max_channel,
+            hide_zeros=hide_zeros,
+        )
 
     def flicker(
         self,

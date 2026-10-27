@@ -15,6 +15,14 @@ import math
 from typing import Mapping, Optional, Sequence, Union
 
 from .fixtures import Channel, DMXCanvas, FixtureGroup, PrimitiveSpec, RGB, Scene
+from .inspector import (
+    DMXFrameView,
+    HTMLView,
+    StageScrubberView,
+    dmx,
+    inspect_dmx,
+    render_interactive_inspector,
+)
 from .state import Color
 
 
@@ -697,101 +705,45 @@ class Stage:
                 stderr=subprocess.DEVNULL,
             )
 
+    def dmx(
+        self,
+        scene_or_dmx: Union[Scene, Sequence[int]],
+        t: float = 0.0,
+        *,
+        max_channel: Optional[int] = None,
+        hide_zeros: bool = False,
+        universe: int = 1,
+    ) -> DMXFrameView:
+        """Inspect the raw DMX frame and channel values at timestamp `t` on this stage."""
+        return inspect_dmx(
+            scene_or_dmx,
+            t=t,
+            stage=self,
+            max_channel=max_channel,
+            hide_zeros=hide_zeros,
+            universe=universe,
+        )
+
     def inspect(
         self,
         scene: Scene,
         *,
         duration: Optional[float] = None,
         fps: float = 20.0,
+        show_dmx: bool = True,
+        max_channel: Optional[int] = None,
+        hide_zeros: bool = False,
     ) -> StageScrubberView:
-        """Interactive Jupyter widget with an animated slider to scrub the 2D stage across time!"""
-        is_inf = math.isinf(scene.duration)
-        show_dur = (6.0 if is_inf else scene.duration) if duration is None else duration
-        if show_dur <= 0:
-            show_dur = 1.0
-
-        # Pre-render frames for instant client-side scrubbing
-        frame_count = max(1, round(show_dur * fps))
-        frames = []
-        for i in range(frame_count):
-            t = i * (show_dur / frame_count)
-            frames.append(str(self.render_svg(scene, t=t, fps=fps)))
-
-        widget_id = f"stage_scrubber_{abs(hash(str(scene) + str(time_hash())))}"
-        frames_json = json.dumps(frames)
-
-        html_body = f"""
-        <div id="{widget_id}" style="max-width: {self.width}px; background: #0b0f17; border: 1px solid #1e293b; 
-                    border-radius: 8px; padding: 12px; margin: 10px 0; font-family: system-ui, sans-serif;">
-            <div id="{widget_id}_view">
-                {frames[0]}
-            </div>
-            <div style="display: flex; align-items: center; gap: 12px; margin-top: 8px; padding: 0 8px;">
-                <button id="{widget_id}_play" style="background: #3b82f6; color: white; border: none; 
-                            border-radius: 4px; padding: 4px 12px; font-size: 12px; cursor: pointer;">▶ Play</button>
-                <input id="{widget_id}_slider" type="range" min="0" max="{frame_count - 1}" value="0" 
-                       style="flex: 1; cursor: pointer; accent-color: #3b82f6;">
-                <span id="{widget_id}_label" style="font-family: monospace; font-size: 12px; color: #94a3b8; min-width: 48px;">0.00s</span>
-            </div>
-            <script>
-            (function() {{
-                const frames = {frames_json};
-                const slider = document.getElementById("{widget_id}_slider");
-                const view = document.getElementById("{widget_id}_view");
-                const label = document.getElementById("{widget_id}_label");
-                const playBtn = document.getElementById("{widget_id}_play");
-                if (!slider || !view || !label || !playBtn) return;
-                const totalDur = {show_dur};
-                let timer = null;
-
-                function update(idx) {{
-                    slider.value = idx;
-                    view.innerHTML = frames[idx];
-                    const t = (idx / frames.length) * totalDur;
-                    label.innerText = t.toFixed(2) + "s";
-                }}
-
-                slider.oninput = function() {{
-                    update(parseInt(this.value));
-                }};
-
-                playBtn.onclick = function() {{
-                    if (timer) {{
-                        clearInterval(timer);
-                        timer = null;
-                        playBtn.innerText = "▶ Play";
-                    }} else {{
-                        playBtn.innerText = "⏸ Pause";
-                        timer = setInterval(function() {{
-                            let next = (parseInt(slider.value) + 1) % frames.length;
-                            update(next);
-                        }}, 1000 / {fps});
-                    }}
-                }};
-            }})();
-            </script>
-        </div>
-        """
-
-        return StageScrubberView(html_body)
-
-
-class HTMLView(str):
-    """A string subclass that implements `_repr_html_()` for rich display in Jupyter Notebooks.
-
-    Inheriting from `str` ensures full backward compatibility with any code expecting a normal string
-    (e.g. slicing, regex, file writes, inkscape/ffmpeg pipelines).
-    """
-
-    def _repr_html_(self) -> str:
-        return str(self)
-
-
-class StageScrubberView(HTMLView):
-    """Interactive Jupyter HTML5/JS scrubber widget for Stage animations."""
-
-    def __new__(cls, html_content: str):
-        return super().__new__(cls, html_content)
+        """Interactive Jupyter widget with animated visualizer, transport controls, and live DMX table."""
+        return render_interactive_inspector(
+            scene=scene,
+            stage=self,
+            duration=duration,
+            fps=fps,
+            show_dmx=show_dmx,
+            max_channel=max_channel,
+            hide_zeros=hide_zeros,
+        )
 
 
 def time_hash() -> int:
@@ -801,6 +753,7 @@ def time_hash() -> int:
 
 __all__ = [
     "COOL_WHITE_RGB",
+    "DMXFrameView",
     "EuroliteBCL40Bar",
     "EurolitePartySpot",
     "HTMLView",
@@ -808,4 +761,6 @@ __all__ = [
     "StageScrubberView",
     "WARM_WHITE_RGB",
     "blend_rgbw",
+    "dmx",
+    "inspect_dmx",
 ]

@@ -132,6 +132,110 @@ class TestJupyterIntegration(unittest.TestCase):
         for i in range(16):
             self.assertIn(f"PARS[{i}]", svg)
 
+    def test_dmx_snapshot_inspection(self) -> None:
+        """Verify static DMX snapshot inspection for Scene, Stage, DMXCanvas, and raw bytes."""
+        from my_rig import STAGE, PARS, STROBE_BAR
+        from lightshow.jupyter import (
+            Color,
+            DMXFrameView,
+            Hold,
+            Rainbow,
+            dmx,
+            inspect_dmx,
+        )
+        from IPython.core.formatters import HTMLFormatter
+
+        scene = PARS(Hold(Color.RED, duration=2.0)) | STROBE_BAR(Hold(Color.BLUE, duration=2.0))
+
+        # 1. Snapshot via scene.dmx(t)
+        view = scene.dmx(0.5)
+        self.assertIsInstance(view, DMXFrameView)
+        self.assertIsInstance(view, str)
+        self.assertTrue(hasattr(view, "_repr_html_"))
+        self.assertIsNotNone(HTMLFormatter()(view))
+
+        html_str = view._repr_html_()
+        self.assertIn("dmx-inspector", html_str)
+        self.assertIn("dmx-fixture-card", html_str)
+        self.assertIn("dmx-fixture-swatch", html_str)
+        self.assertIn("dmx-grid-container", html_str)
+
+        # RGB channels colored
+        self.assertIn("role-r", html_str)
+        self.assertIn("role-g", html_str)
+        self.assertIn("role-b", html_str)
+        # White & strobe channels
+        self.assertIn("role-strobe", html_str)
+        # Verify strobe has pitch black background styling
+        self.assertIn(".dmx-pill.role-strobe", html_str)
+        self.assertIn("background: #000000 !important;", html_str)
+        # Inactive channels are styled as faint zeros
+        self.assertIn("ch-zero", html_str)
+        self.assertIn("opacity: 0.38", html_str)
+        # Hide zeros toggle
+        self.assertIn("Hide 0s", html_str)
+
+        # Programmatic access
+        self.assertEqual(view.channel(1), 255)  # PAR 1 Red = 255
+        self.assertEqual(view.channel(2), 0)    # PAR 1 Green = 0
+        self.assertEqual(view.channel(3), 0)    # PAR 1 Blue = 0
+        self.assertEqual(view.channel(5), 255)  # PAR 1 Master Dimmer = 255
+        self.assertTrue(len(view.active_channels) > 0)
+        self.assertIn(1, view.to_dict())
+        self.assertIn("active channels", repr(view))
+
+        # 2. Snapshot via stage.dmx(scene, t)
+        stage_view = STAGE.dmx(scene, 0.5)
+        self.assertIsInstance(stage_view, DMXFrameView)
+        self.assertIn("PAR 1", stage_view)
+        self.assertIn("BCL-40 Bar", stage_view)
+
+        # 3. Direct dmx() call on raw byte list
+        raw_view = dmx([255, 128, 64, 0, 0, 255], hide_zeros=True)
+        self.assertIsInstance(raw_view, DMXFrameView)
+        self.assertIn("hide-zeros", raw_view)
+        self.assertIn("Show 0s", raw_view)
+
+    def test_interactive_stage_and_scene_dmx_scrubber(self) -> None:
+        """Verify interactive scrubber widget provides prev/next buttons and live synchronized DMX table."""
+        from my_rig import STAGE, PARS
+        from lightshow.jupyter import Color, Hold, StageScrubberView
+        import json, re
+
+        scene = PARS(Hold(Color.GREEN, duration=1.0))
+
+        # 1. STAGE.inspect with live DMX table enabled
+        scrubber = STAGE.inspect(scene, duration=1.0, fps=10.0, show_dmx=True)
+        self.assertIsInstance(scrubber, StageScrubberView)
+        html_str = scrubber._repr_html_()
+
+        # Transport controls: Prev, Play, Next, Slider, Time/Frame label
+        self.assertIn("◀ Prev", html_str)
+        self.assertIn("▶ Play", html_str)
+        self.assertIn("Next ▶", html_str)
+        self.assertIn('type="range"', html_str)
+
+        # Embedded JSON data for 10 frames
+        m_dmx = re.search(r'const dmxFrames = (\[.*?\]);', html_str, re.DOTALL)
+        self.assertIsNotNone(m_dmx)
+        dmx_frames = json.loads(m_dmx.group(1))
+        self.assertEqual(len(dmx_frames), 10)
+        # Each frame has DMX bytes
+        self.assertTrue(len(dmx_frames[0]) >= 24)
+        # Green channel (addr 2) is active = 255
+        self.assertEqual(dmx_frames[0][1], 255)
+
+        # Embedded metadata for live DOM updates
+        self.assertIn("const chMeta =", html_str)
+        self.assertIn("const fixMeta =", html_str)
+
+        # 2. Direct scene.inspect() without STAGE
+        scene_scrubber = scene.inspect(duration=1.0, fps=10.0, show_dmx=True)
+        self.assertIsInstance(scene_scrubber, StageScrubberView)
+        self.assertIn("◀ Prev", scene_scrubber)
+        self.assertIn("Next ▶", scene_scrubber)
+        self.assertIn("dmx-inspector", scene_scrubber)
+
 
 if __name__ == "__main__":
     unittest.main()

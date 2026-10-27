@@ -32,6 +32,7 @@ from lightshow.artnet import ArtNetClient, Rig
 from lightshow.state import Color, Patch
 from lightshow.profiles import (
     COOL_WHITE_RGB,
+    DMXFrameView,
     EuroliteBCL40Bar,
     EurolitePartySpot,
     HTMLView,
@@ -39,6 +40,8 @@ from lightshow.profiles import (
     StageScrubberView,
     WARM_WHITE_RGB,
     blend_rgbw,
+    dmx,
+    inspect_dmx,
 )
 
 
@@ -66,6 +69,7 @@ def render_clip_timeline_svg(
     fixtures: int = 4,
     width: int = 700,
     steps: int = 120,
+    current_time: Optional[float] = None,
 ) -> str:
     """Render an SVG timeline strip visualizing `clip` across `fixtures` fixtures."""
     is_inf = math.isinf(clip.duration)
@@ -162,6 +166,15 @@ def render_clip_timeline_svg(
         )
         current_tick += tick_step
 
+    # Optional vertical playhead cursor for interactive scrubbing
+    if current_time is not None and 0.0 <= current_time <= show_dur + 1e-4:
+        cx = left_margin + (min(show_dur, max(0.0, current_time)) / show_dur) * plot_width
+        svg_elements.append(
+            f'<line x1="{cx:.1f}" y1="{header_height}" x2="{cx:.1f}" y2="{ruler_y}" '
+            f'stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>'
+            f'<polygon points="{cx-4:.1f},{header_height} {cx+4:.1f},{header_height} {cx:.1f},{header_height+6}" fill="#38bdf8"/>'
+        )
+
     content = "".join(svg_elements)
     return HTMLView(
         f'<div style="max-width: {width}px; margin: 8px 0;">'
@@ -178,6 +191,7 @@ def render_scene_timeline_svg(
     duration: Optional[float] = None,
     width: int = 700,
     steps: int = 120,
+    current_time: Optional[float] = None,
 ) -> str:
     """Render an SVG timeline strip visualizing a composable `Scene` across all active groups."""
     is_inf = math.isinf(scene.duration)
@@ -312,6 +326,15 @@ def render_scene_timeline_svg(
             f'font-size="10" text-anchor="middle">{current_tick:.1f}s</text>'
         )
         current_tick += tick_step
+
+    # Optional vertical playhead cursor for interactive scrubbing
+    if current_time is not None and 0.0 <= current_time <= show_dur + 1e-4:
+        cx = left_margin + (min(show_dur, max(0.0, current_time)) / show_dur) * plot_width
+        svg_elements.append(
+            f'<line x1="{cx:.1f}" y1="{header_height}" x2="{cx:.1f}" y2="{ruler_y}" '
+            f'stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>'
+            f'<polygon points="{cx-4:.1f},{header_height} {cx+4:.1f},{header_height} {cx:.1f},{header_height+6}" fill="#38bdf8"/>'
+        )
 
     content = "".join(svg_elements)
     return HTMLView(
@@ -563,6 +586,7 @@ def stop_stream() -> None:
 
 __all__ = list(lightshow.__all__) + [
     "COOL_WHITE_RGB",
+    "DMXFrameView",
     "EuroliteBCL40Bar",
     "EurolitePartySpot",
     "HTMLView",
@@ -571,6 +595,8 @@ __all__ = list(lightshow.__all__) + [
     "StageScrubberView",
     "WARM_WHITE_RGB",
     "blend_rgbw",
+    "dmx",
+    "inspect_dmx",
     "render_clip_timeline_svg",
     "render_scene_timeline_svg",
     "stop_stream",
