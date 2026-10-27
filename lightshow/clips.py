@@ -59,6 +59,10 @@ class Clip:
         """Evaluate the clip at local time `t` (seconds) for `fixture` (0-indexed)."""
         raise NotImplementedError
 
+    def with_fixture_count(self, count: int) -> Clip:
+        """Adapt clip or its child clips to `count` fixtures (e.g. for automatic Chase step count)."""
+        return self
+
     # -------------------------------------------------------------------------
     # Algebraic Operators
     # -------------------------------------------------------------------------
@@ -310,6 +314,12 @@ class SequenceClip(Clip):
             elapsed += clip.duration
         return self.clips[-1].eval(self.clips[-1].duration, fixture, total_fixtures)
 
+    def with_fixture_count(self, count: int) -> SequenceClip:
+        new_clips = [c.with_fixture_count(count) for c in self.clips]
+        if all(nc is c for nc, c in zip(new_clips, self.clips)):
+            return self
+        return SequenceClip(*new_clips)
+
 
 class LayerClip(Clip):
     """Parallel composition (`a | b` for override, `a + b` for additive, `a & b` for multiply)."""
@@ -332,6 +342,13 @@ class LayerClip(Clip):
             return p_bot.multiply(p_top)
         return p_bot.merge(p_top)
 
+    def with_fixture_count(self, count: int) -> LayerClip:
+        new_bot = self.bottom.with_fixture_count(count)
+        new_top = self.top.with_fixture_count(count)
+        if new_bot is self.bottom and new_top is self.top:
+            return self
+        return LayerClip(new_bot, new_top, mode=self.mode)
+
 
 class RepeatClip(Clip):
     """Repeats a finite clip `count` times (`clip * n` or `clip * inf`)."""
@@ -350,6 +367,12 @@ class RepeatClip(Clip):
             return self.child.eval(self.child.duration, fixture, total_fixtures)
         local_t = t % self.child.duration
         return self.child.eval(local_t, fixture, total_fixtures)
+
+    def with_fixture_count(self, count: int) -> RepeatClip:
+        new_child = self.child.with_fixture_count(count)
+        if new_child is self.child:
+            return self
+        return RepeatClip(new_child, count=self.count)
 
 
 class TimeScaleClip(Clip):
@@ -380,6 +403,12 @@ class ReverseClip(Clip):
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         local_t = max(0.0, min(self.duration, self.duration - t))
         return self.child.eval(local_t, fixture, total_fixtures)
+
+    def with_fixture_count(self, count: int) -> ReverseClip:
+        new_child = self.child.with_fixture_count(count)
+        if new_child is self.child:
+            return self
+        return ReverseClip(new_child)
 
 
 class SliceClip(Clip):
@@ -414,6 +443,12 @@ class SliceClip(Clip):
             local_t = self.stop + t * self.step
         return self.child.eval(local_t, fixture, total_fixtures)
 
+    def with_fixture_count(self, count: int) -> SliceClip:
+        new_child = self.child.with_fixture_count(count)
+        if new_child is self.child:
+            return self
+        return SliceClip(new_child, start=self.start, stop=self.stop, step=self.step)
+
 
 class PhaseClip(Clip):
     """Shifts evaluation time per fixture (`clip.phase(offset)`)."""
@@ -431,6 +466,12 @@ class PhaseClip(Clip):
         elif shifted < 0 or shifted > self.child.duration:
             return Patch(color=Color.BLACK, channels={"value": 0.0, "w": 0.0})
         return self.child.eval(shifted, fixture, total_fixtures)
+
+    def with_fixture_count(self, count: int) -> PhaseClip:
+        new_child = self.child.with_fixture_count(count)
+        if new_child is self.child:
+            return self
+        return PhaseClip(new_child, offset_per_fixture=self.offset_per_fixture, wrap=self.wrap)
 
 
 class StaggerClip(Clip):
@@ -493,6 +534,15 @@ class StaggerClip(Clip):
             return result
         return Patch(color=Color.BLACK, channels={"value": 0.0, "w": 0.0})
 
+    def with_fixture_count(self, count: int) -> StaggerClip:
+        new_child = self.child.with_fixture_count(count)
+        return StaggerClip(
+            new_child,
+            offset_per_fixture=self.offset_per_fixture,
+            fixtures=count,
+            bounce=self.bounce,
+        )
+
 
 class EnvelopeClip(Clip):
     """Applies a smooth fade-in and/or fade-out intensity envelope to `child`."""
@@ -547,6 +597,17 @@ class EnvelopeClip(Clip):
             return patch.scale(gain)
         return patch
 
+    def with_fixture_count(self, count: int) -> EnvelopeClip:
+        new_child = self.child.with_fixture_count(count)
+        if new_child is self.child:
+            return self
+        return EnvelopeClip(
+            new_child,
+            fade_in=self.fade_in_dur,
+            fade_out=self.fade_out_dur,
+            ease=self.ease_fn,
+        )
+
 
 class SpreadClip(Clip):
     """Spreads phase evenly across `total_fixtures` (`clip.spread()`)."""
@@ -566,6 +627,12 @@ class SpreadClip(Clip):
             shifted = shifted % self.child.duration
         return self.child.eval(max(0.0, shifted), fixture, total_fixtures)
 
+    def with_fixture_count(self, count: int) -> SpreadClip:
+        new_child = self.child.with_fixture_count(count)
+        if new_child is self.child:
+            return self
+        return SpreadClip(new_child, total_offset=self.total_offset)
+
 
 class MaskClip(Clip):
     """Applies `child` only to fixtures in `allowed_fixtures`, transparent elsewhere."""
@@ -580,6 +647,12 @@ class MaskClip(Clip):
             return Patch()
         return self.child.eval(t, fixture, total_fixtures)
 
+    def with_fixture_count(self, count: int) -> MaskClip:
+        new_child = self.child.with_fixture_count(count)
+        if new_child is self.child:
+            return self
+        return MaskClip(new_child, allowed_fixtures=self.allowed_fixtures)
+
 
 class MirrorClip(Clip):
     """Maps fixture index symmetrically from the outside in (e.g. 0->0, 1->1, 2->1, 3->0)."""
@@ -593,6 +666,12 @@ class MirrorClip(Clip):
         half_count = max(1, (total_fixtures + 1) // 2)
         return self.child.eval(t, mirrored_idx, half_count)
 
+    def with_fixture_count(self, count: int) -> MirrorClip:
+        new_child = self.child.with_fixture_count(count)
+        if new_child is self.child:
+            return self
+        return MirrorClip(new_child)
+
 
 class ReverseFixturesClip(Clip):
     """Reverses fixture index (`total_fixtures - 1 - fixture`)."""
@@ -604,6 +683,12 @@ class ReverseFixturesClip(Clip):
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         rev_idx = max(0, total_fixtures - 1 - fixture)
         return self.child.eval(t, rev_idx, total_fixtures)
+
+    def with_fixture_count(self, count: int) -> ReverseFixturesClip:
+        new_child = self.child.with_fixture_count(count)
+        if new_child is self.child:
+            return self
+        return ReverseFixturesClip(new_child)
 
 
 class ScaleClip(Clip):
@@ -617,6 +702,12 @@ class ScaleClip(Clip):
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         return self.child.eval(t, fixture, total_fixtures).scale(self.factor, attr=self.attr)
+
+    def with_fixture_count(self, count: int) -> ScaleClip:
+        new_child = self.child.with_fixture_count(count)
+        if new_child is self.child:
+            return self
+        return ScaleClip(new_child, factor=self.factor, attr=self.attr)
 
 
 class ChannelMapClip(Clip):
@@ -830,8 +921,9 @@ class Chase(Clip):
         lead: float = 0.0,
         hold: float = 0.0,
         tail: float = 0.0,
-        num_steps: int = 4,
+        num_steps: Optional[int] = None,
         wrap: bool = True,
+        _explicit_num_steps: Optional[bool] = None,
     ) -> None:
         self.color = Color(color, color, color) if isinstance(color, (int, float)) else color
         if isinstance(background, (int, float)):
@@ -842,9 +934,25 @@ class Chase(Clip):
         self.lead = max(0.0, float(lead))
         self.hold = max(0.0, float(hold))
         self.tail = max(0.0, float(tail))
-        self.num_steps = num_steps
+        self._explicit_num_steps = (num_steps is not None) if _explicit_num_steps is None else _explicit_num_steps
+        self.num_steps = 4 if num_steps is None else max(1, int(num_steps))
         self.wrap = wrap
         self.duration = self.step_duration * self.num_steps
+
+    def with_fixture_count(self, count: int) -> Chase:
+        if self._explicit_num_steps:
+            return self
+        return Chase(
+            self.color,
+            self.step_duration,
+            background=self.background,
+            lead=self.lead,
+            hold=self.hold,
+            tail=self.tail,
+            num_steps=count,
+            wrap=self.wrap,
+            _explicit_num_steps=False,
+        )
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         n = max(1, total_fixtures)
@@ -925,6 +1033,8 @@ class Chase(Clip):
         hold: Optional[float] = None,
     ) -> PingPongChase:
         """Step back and forth through fixtures without repeating turnaround endpoints."""
+        explicit = (num_steps is not None) or self._explicit_num_steps
+        steps = self.num_steps if num_steps is None else num_steps
         return PingPongChase(
             self.color,
             self.step_duration,
@@ -932,8 +1042,9 @@ class Chase(Clip):
             lead=self.lead if lead is None else lead,
             hold=self.hold if hold is None else hold,
             tail=self.tail,
-            num_steps=self.num_steps if num_steps is None else num_steps,
+            num_steps=steps,
             wrap=wrap,
+            _explicit_num_steps=explicit,
         )
 
 
@@ -955,8 +1066,9 @@ class PingPongChase(Clip):
         lead: float = 0.0,
         hold: float = 0.0,
         tail: float = 0.0,
-        num_steps: int = 4,
+        num_steps: Optional[int] = None,
         wrap: bool = True,
+        _explicit_num_steps: Optional[bool] = None,
     ) -> None:
         self.color = Color(color, color, color) if isinstance(color, (int, float)) else color
         if isinstance(background, (int, float)):
@@ -967,10 +1079,26 @@ class PingPongChase(Clip):
         self.lead = max(0.0, float(lead))
         self.hold = max(0.0, float(hold))
         self.tail = max(0.0, float(tail))
-        self.num_steps = max(1, int(num_steps))
+        self._explicit_num_steps = (num_steps is not None) if _explicit_num_steps is None else _explicit_num_steps
+        self.num_steps = 4 if num_steps is None else max(1, int(num_steps))
         self.bounce_steps = 2 * (self.num_steps - 1) if self.num_steps > 1 else 1
         self.duration = self.step_duration * self.bounce_steps
         self.wrap = wrap
+
+    def with_fixture_count(self, count: int) -> PingPongChase:
+        if self._explicit_num_steps:
+            return self
+        return PingPongChase(
+            self.color,
+            self.step_duration,
+            background=self.background,
+            lead=self.lead,
+            hold=self.hold,
+            tail=self.tail,
+            num_steps=count,
+            wrap=self.wrap,
+            _explicit_num_steps=False,
+        )
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         n = max(1, total_fixtures)
@@ -1048,18 +1176,6 @@ class PingPongChase(Clip):
                         d_ahead = dt_until / step_dt
                         if d_ahead <= self.lead:
                             intensity = max(intensity, 1.0 - d_ahead / self.lead)
-
-        if self.background is not None:
-            return Patch(color=self.background.lerp(self.color, intensity))
-        if intensity > 0.0:
-            return Patch(color=self.color * intensity)
-        return Patch()
-
-        if self.background is not None:
-            return Patch(color=self.background.lerp(self.color, intensity))
-        if intensity > 0.0:
-            return Patch(color=self.color * intensity)
-        return Patch()
 
         if self.background is not None:
             return Patch(color=self.background.lerp(self.color, intensity))
@@ -1328,6 +1444,24 @@ class Flicker(Clip):
                 dimmer_scale=factor,
             )
 
+    def with_fixture_count(self, count: int) -> Flicker:
+        if self.child is not None:
+            new_child = self.child.with_fixture_count(count)
+            if new_child is self.child:
+                return self
+            return Flicker(
+                new_child,
+                speed=self.speed,
+                depth=self.depth,
+                low=self.low,
+                high=self.high,
+                octaves=self.octaves,
+                seed=self.seed,
+                decorrelate=self.decorrelate,
+                duration=self.duration,
+            )
+        return self
+
 
 class HueShift(Clip):
     """Relative HSV shift and hue jitter clip.
@@ -1420,3 +1554,23 @@ class HueShift(Clip):
                 dv=self.dv,
                 dimmer_scale=self.dimmer_scale,
             )
+
+    def with_fixture_count(self, count: int) -> HueShift:
+        if self.child is not None:
+            new_child = self.child.with_fixture_count(count)
+            if new_child is self.child:
+                return self
+            return HueShift(
+                new_child,
+                dh=self.dh_input,
+                ds=self.ds,
+                dv=self.dv,
+                amount=self.amount,
+                speed=self.speed,
+                octaves=self.octaves,
+                seed=self.seed,
+                decorrelate=self.decorrelate,
+                dimmer_scale=self.dimmer_scale,
+                duration=self.duration,
+            )
+        return self

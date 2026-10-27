@@ -441,6 +441,41 @@ class TestLightshow(unittest.TestCase):
         self.assertAlmostEqual(pp_sym.eval(dur_pp / 2.0 + 1.0 * s_dt, fixture=7, total_fixtures=8).color.r, 0.00, places=3)
         self.assertEqual(pp_sym.eval(dur_pp / 2.0 + 1.0 * s_dt, fixture=6, total_fixtures=8).color, Color.WHITE)
 
+    def test_chase_automatic_fixture_group_adaptation(self) -> None:
+        """Verify Chase and PingPongChase automatically adapt step count to bound FixtureGroup."""
+        from lightshow.profiles import EurolitePartySpot
+
+        PARS_16 = EurolitePartySpot.group("PARS", start_channels=[1 + i * 6 for i in range(16)])
+        self.assertEqual(PARS_16.count, 16)
+
+        # 1. Default Chase adapts to 16 fixtures (16 * 1.0s = 16.0s)
+        scene_16 = PARS_16(Chase(Color.PURPLE, step_duration=1.0))
+        self.assertEqual(scene_16.duration, 16.0)
+
+        # 2. Sliced group adapts to slice count (8 * 1.0s = 8.0s)
+        scene_8 = PARS_16[0:8](Chase(Color.PURPLE, step_duration=1.0))
+        self.assertEqual(scene_8.duration, 8.0)
+
+        # 3. PingPong adapts to 16 fixtures: 2 * (16 - 1) * 1.0s = 30.0s
+        scene_pp16 = PARS_16(Chase(Color.PURPLE, step_duration=1.0).pingpong())
+        self.assertEqual(scene_pp16.duration, 30.0)
+
+        # 4. PingPong on 8 fixtures: 2 * (8 - 1) * 1.0s = 14.0s
+        scene_pp8 = PARS_16[0:8](Chase(Color.PURPLE, step_duration=1.0).pingpong())
+        self.assertEqual(scene_pp8.duration, 14.0)
+
+        # 5. Explicit num_steps=4 overrides automatic adaptation
+        scene_explicit = PARS_16(Chase(Color.PURPLE, step_duration=1.0, num_steps=4))
+        self.assertEqual(scene_explicit.duration, 4.0)
+
+        # 6. Explicit time scale with @ overrides duration
+        scene_ts = PARS_16(Chase(Color.PURPLE, step_duration=1.0) @ 5.0)
+        self.assertEqual(scene_ts.duration, 5.0)
+
+        # 7. Repetition scales adapted duration: 16 * 1.0s * 2 = 32.0s
+        scene_rep = PARS_16(Chase(Color.PURPLE, step_duration=1.0) * 2)
+        self.assertEqual(scene_rep.duration, 32.0)
+
     def test_clip_and_scene_time_slicing(self) -> None:
         """Verify time slicing clip[start:stop] and scene[start:stop] with repeating."""
         from lightshow import Rainbow, SliceClip, SliceScene

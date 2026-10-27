@@ -227,7 +227,8 @@ class FixtureGroup:
         Example:
             `ALL_RGB(Rainbow()) + PAR_RGB(Pulse(Color.RED))`
         """
-        return BoundScene(self, clip)
+        adapted_clip = clip.with_fixture_count(self.count)
+        return BoundScene(self, adapted_clip)
 
     @classmethod
     def from_template(
