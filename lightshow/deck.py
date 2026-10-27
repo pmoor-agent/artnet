@@ -810,16 +810,39 @@ class ControlDeck:
     def show(self) -> Any:
         """Display the interactive control deck widget in the notebook."""
         from IPython.display import display
-        display(self._widget)
+        display(self)
         return self
-
-    def _ipython_display_(self) -> None:
-        """Automatic rich display when evaluated in a Jupyter notebook cell."""
-        from IPython.display import display
-        display(self._widget)
 
     def _repr_mimebundle_(self, include=None, exclude=None):
         """Delegate rich MIME bundle rendering directly to the ipywidgets container."""
         if hasattr(self._widget, "_repr_mimebundle_"):
-            return self._widget._repr_mimebundle_(include=include, exclude=exclude)
+            bundle = self._widget._repr_mimebundle_(include=include, exclude=exclude)
+            if isinstance(bundle, dict):
+                # When the browser tab hasn't refreshed after pip install ipywidgets,
+                # Jupyter falls back from widget-view to text/html or text/plain.
+                # Provide an unmistakable, helpful diagnostic message instead of raw "VBox(children=(...))".
+                bundle["text/plain"] = (
+                    "[ControlDeck] Interactive widget is active in kernel.\n"
+                    "If your notebook displays this text instead of the interactive buttons and sliders, "
+                    "your browser tab has not loaded the widget extension yet.\n"
+                    "Please refresh your browser page (press F5 or Ctrl+R / Cmd+R) to activate the UI."
+                )
+                bundle["text/html"] = f"""
+                <div style="font-family: system-ui, sans-serif; background: #0f172a !important; border: 1px solid #3b82f6; border-radius: 8px; padding: 14px 18px; max-width: 650px; color: #f8fafc !important; margin: 10px 0; box-shadow: 0 4px 15px rgba(0,0,0,0.4);">
+                    <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: #60a5fa !important; margin-bottom: 6px;">
+                        <span style="font-size: 18px;">🎛️</span>
+                        <span>ControlDeck: Interactive Widget Loaded</span>
+                    </div>
+                    <div style="font-size: 12px; line-height: 1.5; color: #cbd5e1 !important;">
+                        The background streaming engine is running, but your browser tab has not loaded the newly installed <code>ipywidgets</code> JavaScript assets yet.<br><br>
+                        <strong>To display the interactive DJ/VJ buttons and sliders:</strong>
+                        <ol style="margin: 6px 0 6px 20px; padding: 0;">
+                            <li><strong>Refresh your browser tab</strong> (press <kbd style="background: #1e293b; padding: 2px 6px; border-radius: 4px; border: 1px solid #475569; color: #f8fafc;">F5</kbd> or <kbd style="background: #1e293b; padding: 2px 6px; border-radius: 4px; border: 1px solid #475569; color: #f8fafc;">Ctrl+R</kbd> / <kbd style="background: #1e293b; padding: 2px 6px; border-radius: 4px; border: 1px solid #475569; color: #f8fafc;">Cmd+R</kbd>)</li>
+                            <li>Re-run this cell</li>
+                        </ol>
+                        <em>(In the meantime, programmatic control is active: <code>deck.play()</code>, <code>deck.next()</code>, <code>deck.go()</code>, <code>deck.set_bpm({self.tempo.bpm:g})</code>)</em>
+                    </div>
+                </div>
+                """
+            return bundle
         return None
