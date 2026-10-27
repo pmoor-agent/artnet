@@ -291,11 +291,18 @@ def ch(name: str, clip_or_val: Union[Clip, float], *, duration: float = inf) -> 
 
 
 class SequenceClip(Clip):
-    """Sequential composition (`a >> b >> c`)."""
+    """Sequential composition (`a >> b >> c` or `Sequence([a, b, c])`)."""
 
-    def __init__(self, *clips: Clip) -> None:
-        flattened: list[Clip] = []
+    def __init__(self, *clips: Union[Clip, SeqType[Clip]]) -> None:
+        raw: list[Clip] = []
         for c in clips:
+            if isinstance(c, (list, tuple)):
+                raw.extend(c)
+            else:
+                raw.append(c)
+
+        flattened: list[Clip] = []
+        for c in raw:
             if isinstance(c, SequenceClip):
                 flattened.extend(c.clips)
             else:

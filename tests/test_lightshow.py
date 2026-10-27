@@ -705,6 +705,44 @@ class TestLightshow(unittest.TestCase):
         self.assertGreater(dmx_fx[6], 0)
         self.assertNotEqual(dmx_fx[0], dmx_fx[6])
 
+    def test_list_and_sequence_syntax(self) -> None:
+        """Verify list-based time sequencing and Sequence/Seq constructors."""
+        from lightshow import Pulse, Fade, Hold, Sequence, Seq
+
+        c1 = Fade(Color.BLUE, Color.MAGENTA, duration=1.0)
+        c2 = Pulse(Color.CYAN, duration=1.0)
+        c3 = Hold(Color.AMBER, duration=0.8)
+
+        # 1. Direct list in FixtureGroup: PARS([c1, c2, c3])
+        scene_list = PARS([c1, c2, c3])
+        self.assertAlmostEqual(scene_list.duration, 2.8)
+
+        # 2. List repetition: PARS([c1, c2] * 3) -> 6 cues (6.0s)
+        scene_rep = PARS([c1, c2] * 3)
+        self.assertAlmostEqual(scene_rep.duration, 6.0)
+
+        # 3. Sequence() and Seq() with Clips (both positional and list)
+        seq_clip_args = Sequence(c1, c2, c3)
+        seq_clip_list = Sequence([c1, c2, c3])
+        seq_clip_alias = Seq([c1, c2, c3])
+        self.assertAlmostEqual(seq_clip_args.duration, 2.8)
+        self.assertAlmostEqual(seq_clip_list.duration, 2.8)
+        self.assertAlmostEqual(seq_clip_alias.duration, 2.8)
+
+        # 4. Sequence() with Scenes (both positional and list)
+        s1 = PARS(c1)
+        s2 = PARS(c2)
+        seq_scene_args = Sequence(s1, s2)
+        seq_scene_list = Sequence([s1, s2])
+        self.assertAlmostEqual(seq_scene_args.duration, 2.0)
+        self.assertAlmostEqual(seq_scene_list.duration, 2.0)
+
+        # 5. Parity between >> and list
+        scene_op = PARS(c1 >> c2 >> c3)
+        self.assertEqual(scene_list.eval_canvas(0.5).to_dmx_list(), scene_op.eval_canvas(0.5).to_dmx_list())
+        self.assertEqual(scene_list.eval_canvas(1.5).to_dmx_list(), scene_op.eval_canvas(1.5).to_dmx_list())
+        self.assertEqual(scene_list.eval_canvas(2.5).to_dmx_list(), scene_op.eval_canvas(2.5).to_dmx_list())
+
 
 if __name__ == "__main__":
     unittest.main()

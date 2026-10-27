@@ -221,12 +221,16 @@ class FixtureGroup:
     def __str__(self) -> str:
         return self.name
 
-    def __call__(self, clip: Clip) -> BoundScene:
-        """Bind `clip` to this `FixtureGroup`, returning an algebraically composable `Scene`!
+    def __call__(self, clip: Union[Clip, Sequence[Clip]]) -> BoundScene:
+        """Bind `clip` (or a sequence/list of clips) to this `FixtureGroup`, returning an algebraically composable `Scene`!
 
         Example:
             `ALL_RGB(Rainbow()) + PAR_RGB(Pulse(Color.RED))`
+            `PARS([Fade(Color.BLUE, Color.MAGENTA), Pulse(Color.CYAN)])`
         """
+        if isinstance(clip, (list, tuple)):
+            from .clips import SequenceClip
+            clip = SequenceClip(*clip)
         adapted_clip = clip.with_fixture_count(self.count)
         return BoundScene(self, adapted_clip)
 
@@ -693,11 +697,18 @@ class LayerScene(Scene):
 
 
 class SequenceScene(Scene):
-    """Sequential composition of `Scene`s (`scene1 >> scene2`)."""
+    """Sequential composition of `Scene`s (`scene1 >> scene2` or `Sequence([s1, s2])`)."""
 
-    def __init__(self, *scenes: Scene) -> None:
-        flattened: list[Scene] = []
+    def __init__(self, *scenes: Union[Scene, Sequence[Scene]]) -> None:
+        raw: list[Scene] = []
         for s in scenes:
+            if isinstance(s, (list, tuple)):
+                raw.extend(s)
+            else:
+                raw.append(s)
+
+        flattened: list[Scene] = []
+        for s in raw:
             if isinstance(s, SequenceScene):
                 flattened.extend(s.scenes)
             else:
@@ -889,3 +900,32 @@ class ScaleScene(Scene):
 
     def shift_hsv(self, dh: Union[float, Clip] = 0.0, ds: float = 0.0, dv: float = 0.0, **kwargs) -> Scene:
         return ScaleScene(self.child.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs), factor=self.factor)
+
+
+def Sequence(*items: Union[Clip, Scene, Sequence[Union[Clip, Scene]]]) -> Union[Clip, Scene]:
+    """Compose clips or scenes sequentially in chronological time.
+
+    Supports both positional arguments and a single list/tuple:
+      `Sequence(clip1, clip2, clip3)`
+      `Sequence([clip1, clip2, clip3])`
+      `Sequence(scene1, scene2, scene3)`
+      `Sequence([scene1, scene2, scene3])`
+    """
+    from .clips import SequenceClip
+
+    raw: list[Union[Clip, Scene]] = []
+    for item in items:
+        if isinstance(item, (list, tuple)):
+            raw.extend(item)
+        else:
+            raw.append(item)
+
+    if not raw:
+        return SequenceClip()
+
+    if isinstance(raw[0], Scene):
+        return SequenceScene(*raw)
+    return SequenceClip(*raw)
+
+
+Seq = Sequence
