@@ -827,6 +827,7 @@ class Chase(Clip):
         step_duration: float = 0.25,
         *,
         background: Optional[Union[Color, float]] = Color.BLACK,
+        lead: float = 0.0,
         hold: float = 0.0,
         tail: float = 0.0,
         num_steps: int = 4,
@@ -838,6 +839,7 @@ class Chase(Clip):
         else:
             self.background = background
         self.step_duration = float(step_duration)
+        self.lead = max(0.0, float(lead))
         self.hold = max(0.0, float(hold))
         self.tail = max(0.0, float(tail))
         self.num_steps = num_steps
@@ -853,7 +855,7 @@ class Chase(Clip):
         else:
             pos = (t / self.duration) * n
 
-        if self.tail <= 0.0 and self.hold <= 0.0:
+        if self.lead <= 0.0 and self.hold <= 0.0 and self.tail <= 0.0:
             active = (int(pos) == (fixture % n)) if self.wrap else (int(pos) == fixture)
             if active:
                 return Patch(color=self.color)
@@ -861,21 +863,53 @@ class Chase(Clip):
 
         if self.wrap:
             dist = (pos - fixture) % n
+            if dist > n - 1e-9:
+                dist = 0.0
+
+            # 1. Hold and tail (time since arrival)
+            if dist <= self.hold:
+                i_tail = 1.0
+            else:
+                decay_span = self.tail if (self.hold > 0.0 or self.lead > 0.0) else (1.0 + self.tail)
+                if decay_span > 0.0 and (dist - self.hold) <= decay_span:
+                    i_tail = max(0.0, 1.0 - (dist - self.hold) / decay_span)
+                else:
+                    i_tail = 0.0
+
+            # 2. Lead ramp-in (time until arrival)
+            if self.lead > 0.0:
+                d_ahead = (fixture - pos) % n
+                if d_ahead > n - 1e-9:
+                    d_ahead = 0.0
+                if d_ahead <= self.lead:
+                    i_lead = max(0.0, 1.0 - d_ahead / self.lead)
+                else:
+                    i_lead = 0.0
+            else:
+                i_lead = 0.0
+
+            intensity = max(i_tail, i_lead)
         else:
             dist = pos - fixture
-
-        if dist < -1e-9:
-            intensity = 0.0
-        else:
-            d = max(0.0, dist)
-            if d <= self.hold:
-                intensity = 1.0
-            else:
-                decay_span = self.tail if self.hold > 0.0 else (1.0 + self.tail)
-                if decay_span <= 0.0 or (d - self.hold) > decay_span:
-                    intensity = 0.0
+            if dist < -1e-9:
+                if self.lead > 0.0:
+                    d_ahead = -dist
+                    if d_ahead <= self.lead:
+                        intensity = max(0.0, 1.0 - d_ahead / self.lead)
+                    else:
+                        intensity = 0.0
                 else:
-                    intensity = max(0.0, 1.0 - (d - self.hold) / decay_span)
+                    intensity = 0.0
+            else:
+                d = max(0.0, dist)
+                if d <= self.hold:
+                    intensity = 1.0
+                else:
+                    decay_span = self.tail if (self.hold > 0.0 or self.lead > 0.0) else (1.0 + self.tail)
+                    if decay_span <= 0.0 or (d - self.hold) > decay_span:
+                        intensity = 0.0
+                    else:
+                        intensity = max(0.0, 1.0 - (d - self.hold) / decay_span)
 
         if self.background is not None:
             return Patch(color=self.background.lerp(self.color, intensity))
@@ -887,6 +921,7 @@ class Chase(Clip):
         self,
         num_steps: Optional[int] = None,
         wrap: bool = True,
+        lead: Optional[float] = None,
         hold: Optional[float] = None,
     ) -> PingPongChase:
         """Step back and forth through fixtures without repeating turnaround endpoints."""
@@ -894,6 +929,7 @@ class Chase(Clip):
             self.color,
             self.step_duration,
             background=self.background,
+            lead=self.lead if lead is None else lead,
             hold=self.hold if hold is None else hold,
             tail=self.tail,
             num_steps=self.num_steps if num_steps is None else num_steps,
@@ -916,6 +952,7 @@ class PingPongChase(Clip):
         step_duration: float = 0.25,
         *,
         background: Optional[Union[Color, float]] = Color.BLACK,
+        lead: float = 0.0,
         hold: float = 0.0,
         tail: float = 0.0,
         num_steps: int = 4,
@@ -927,6 +964,7 @@ class PingPongChase(Clip):
         else:
             self.background = background
         self.step_duration = float(step_duration)
+        self.lead = max(0.0, float(lead))
         self.hold = max(0.0, float(hold))
         self.tail = max(0.0, float(tail))
         self.num_steps = max(1, int(num_steps))
@@ -953,7 +991,7 @@ class PingPongChase(Clip):
         if 0 < fixture < m:
             trigs.append((cycle_steps - fixture) * step_dt)
 
-        if self.tail <= 0.0 and self.hold <= 0.0:
+        if self.lead <= 0.0 and self.hold <= 0.0 and self.tail <= 0.0:
             for tr in trigs:
                 if self.wrap:
                     dt = (local_t - tr) % period
@@ -968,29 +1006,54 @@ class PingPongChase(Clip):
             return Patch(color=self.background) if self.background is not None else Patch()
 
         intensity = 0.0
-        decay_span = self.tail if self.hold > 0.0 else (1.0 + self.tail)
+        decay_span = self.tail if (self.hold > 0.0 or self.lead > 0.0) else (1.0 + self.tail)
         for tr in trigs:
             if self.wrap:
-                for dt_raw in (local_t - tr, local_t + period - tr):
-                    dt = dt_raw
-                    if -1e-9 <= dt < 0.0:
-                        dt = 0.0
-                    if dt >= 0.0:
-                        d_steps = dt / step_dt
-                        if d_steps <= self.hold:
-                            intensity = max(intensity, 1.0)
-                        elif decay_span > 0.0 and (d_steps - self.hold) <= decay_span:
-                            intensity = max(intensity, 1.0 - (d_steps - self.hold) / decay_span)
+                # 1. Tail and Hold (time elapsed since hit)
+                dt_since = (local_t - tr) % period
+                if dt_since > period - 1e-9:
+                    dt_since = 0.0
+                d_steps = dt_since / step_dt
+                if d_steps <= self.hold:
+                    intensity = max(intensity, 1.0)
+                elif decay_span > 0.0 and (d_steps - self.hold) <= decay_span:
+                    intensity = max(intensity, 1.0 - (d_steps - self.hold) / decay_span)
+
+                # 2. Lead ramp-in (time until hit)
+                if self.lead > 0.0:
+                    dt_until = (tr - local_t) % period
+                    if dt_until > period - 1e-9:
+                        dt_until = 0.0
+                    d_ahead = dt_until / step_dt
+                    if 0.0 <= d_ahead <= self.lead:
+                        intensity = max(intensity, 1.0 - d_ahead / self.lead)
             else:
-                dt = local_t - tr
-                if -1e-9 <= dt < 0.0:
-                    dt = 0.0
-                if dt >= 0.0:
-                    d_steps = dt / step_dt
+                # 1. Tail and Hold
+                dt_since = local_t - tr
+                if -1e-9 <= dt_since < 0.0:
+                    dt_since = 0.0
+                if dt_since >= 0.0:
+                    d_steps = dt_since / step_dt
                     if d_steps <= self.hold:
                         intensity = max(intensity, 1.0)
                     elif decay_span > 0.0 and (d_steps - self.hold) <= decay_span:
                         intensity = max(intensity, 1.0 - (d_steps - self.hold) / decay_span)
+
+                # 2. Lead ramp-in
+                if self.lead > 0.0:
+                    dt_until = tr - local_t
+                    if -1e-9 <= dt_until < 0.0:
+                        dt_until = 0.0
+                    if dt_until >= 0.0:
+                        d_ahead = dt_until / step_dt
+                        if d_ahead <= self.lead:
+                            intensity = max(intensity, 1.0 - d_ahead / self.lead)
+
+        if self.background is not None:
+            return Patch(color=self.background.lerp(self.color, intensity))
+        if intensity > 0.0:
+            return Patch(color=self.color * intensity)
+        return Patch()
 
         if self.background is not None:
             return Patch(color=self.background.lerp(self.color, intensity))

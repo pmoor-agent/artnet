@@ -386,6 +386,61 @@ class TestLightshow(unittest.TestCase):
         p7_decay2 = pp.eval(dur / 2.0 + 3.0 * step_dt, fixture=7, total_fixtures=8)
         self.assertAlmostEqual(p7_decay2.color.r, 0.00, places=3)
 
+    def test_chase_lead_ramp_in_and_pingpong(self) -> None:
+        """Verify Chase and PingPongChase 'lead' parameter ramps intensity up before fixture arrival."""
+        # 1. Linear sweep with symmetric triangle: lead=1.0, hold=0.0, tail=1.0
+        chase_sym = Chase(Color.WHITE, step_duration=0.2, lead=1.0, hold=0.0, tail=1.0, num_steps=8, wrap=False)
+        self.assertEqual(chase_sym.lead, 1.0)
+        self.assertEqual(chase_sym.hold, 0.0)
+        self.assertEqual(chase_sym.tail, 1.0)
+
+        # For fixture 3 (hit at pos=3.0, i.e. t = 3 * 0.2 = 0.6s):
+        # At t=0.4s (pos=2.0, d_ahead=1.0): ramp begins at 0.00
+        self.assertAlmostEqual(chase_sym.eval(0.40, fixture=3, total_fixtures=8).color.r, 0.00, places=3)
+        # At t=0.5s (pos=2.5, d_ahead=0.5): ramp is halfway up at 0.50
+        self.assertAlmostEqual(chase_sym.eval(0.50, fixture=3, total_fixtures=8).color.r, 0.50, places=3)
+        # At t=0.6s (pos=3.0, d=0.0): peak at 1.00
+        self.assertEqual(chase_sym.eval(0.60, fixture=3, total_fixtures=8).color, Color.WHITE)
+        # At t=0.7s (pos=3.5, d_tail=0.5): decaying halfway at 0.50
+        self.assertAlmostEqual(chase_sym.eval(0.70, fixture=3, total_fixtures=8).color.r, 0.50, places=3)
+        # At t=0.8s (pos=4.0, d_tail=1.0): ramp ends at 0.00
+        self.assertAlmostEqual(chase_sym.eval(0.80, fixture=3, total_fixtures=8).color.r, 0.00, places=3)
+
+        # 2. Circular wrap: fixture 0 ramps in smoothly before wrap boundary
+        chase_circ = Chase(Color.WHITE, step_duration=0.2, lead=1.0, hold=1.0, tail=1.0, num_steps=8, wrap=True)
+        dur = chase_circ.duration  # 1.6s
+        # At pos=7.5 (t = 1.5s): 0.5 steps before fixture 0 arrives -> 50% ramp-in
+        self.assertAlmostEqual(chase_circ.eval(1.50, fixture=0, total_fixtures=8).color.r, 0.50, places=3)
+        # At pos=0.0 (t = 0.0s): at arrival -> 100%
+        self.assertEqual(chase_circ.eval(0.00, fixture=0, total_fixtures=8).color, Color.WHITE)
+        # At pos=0.5 (t = 0.1s): within hold window -> 100%
+        self.assertEqual(chase_circ.eval(0.10, fixture=0, total_fixtures=8).color, Color.WHITE)
+        # At pos=1.0 (t = 0.2s): end of hold window -> 100%
+        self.assertEqual(chase_circ.eval(0.20, fixture=0, total_fixtures=8).color, Color.WHITE)
+        # At pos=1.5 (t = 0.3s): halfway through tail decay -> 50%
+        self.assertAlmostEqual(chase_circ.eval(0.30, fixture=0, total_fixtures=8).color.r, 0.50, places=3)
+        # At pos=2.0 (t = 0.4s): tail finished -> 0%
+        self.assertAlmostEqual(chase_circ.eval(0.40, fixture=0, total_fixtures=8).color.r, 0.00, places=3)
+
+        # 3. PingPongChase with lead=1.0, hold=0.0, tail=1.0
+        pp_sym = Chase(Color.WHITE, step_duration=0.1, lead=1.0, hold=0.0, tail=1.0, num_steps=8).pingpong()
+        self.assertEqual(pp_sym.lead, 1.0)
+        self.assertEqual(pp_sym.hold, 0.0)
+        self.assertEqual(pp_sym.tail, 1.0)
+        dur_pp = pp_sym.duration
+        s_dt = dur_pp / 14.0
+
+        # Turnaround at PAR 7 (t = dur / 2 = 7 * s_dt)
+        # Half step before turnaround (t = 6.5 * s_dt): PAR 7 ramps up to 50%
+        self.assertAlmostEqual(pp_sym.eval(dur_pp / 2.0 - 0.5 * s_dt, fixture=7, total_fixtures=8).color.r, 0.50, places=3)
+        # At turnaround apex (t = 7 * s_dt): PAR 7 hits 100%
+        self.assertEqual(pp_sym.eval(dur_pp / 2.0, fixture=7, total_fixtures=8).color, Color.WHITE)
+        # Half step into return bounce (t = 7.5 * s_dt): PAR 7 decays symmetrically to 50%
+        self.assertAlmostEqual(pp_sym.eval(dur_pp / 2.0 + 0.5 * s_dt, fixture=7, total_fixtures=8).color.r, 0.50, places=3)
+        # 1 step into return bounce (t = 8.0 * s_dt): PAR 7 finishes decay (0%), and PAR 6 hits 100% peak
+        self.assertAlmostEqual(pp_sym.eval(dur_pp / 2.0 + 1.0 * s_dt, fixture=7, total_fixtures=8).color.r, 0.00, places=3)
+        self.assertEqual(pp_sym.eval(dur_pp / 2.0 + 1.0 * s_dt, fixture=6, total_fixtures=8).color, Color.WHITE)
+
     def test_clip_and_scene_time_slicing(self) -> None:
         """Verify time slicing clip[start:stop] and scene[start:stop] with repeating."""
         from lightshow import Rainbow, SliceClip, SliceScene

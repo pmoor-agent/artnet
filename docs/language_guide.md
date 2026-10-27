@@ -232,12 +232,13 @@ wave = PARS(Rainbow(duration=2.4).spread())
 
 ### Marquee Chases (`Chase`)
 
-`Chase` creates a classic marquee sweep across fixtures with customizable speed, hold time, trail falloff, and background glow:
+`Chase` creates a classic marquee sweep across fixtures with customizable speed, ramp-in lead, hold time, trail falloff, and background glow:
 
 ```python
 chase = Chase(
     color=Color.YELLOW,
     step_duration=0.15,
+    lead=1.0,                                    # 1-fixture smooth ramp-in ahead of the spot
     hold=1.0,                                    # Hold fixture at 100% full brightness for 1 step duration
     tail=2.0,                                    # Soft 2-fixture decay trail after the hold window
     background=Color.from_hex("#0d0033"),        # Deep indigo ambient background
@@ -249,11 +250,15 @@ scene = PARS(chase @ 2.4)
 ![Ping-Pong Marquee Chase with Tail](./images/04_chase_pingpong.gif)
 
 > [!NOTE]
-> **Hold & Tail Parameters**:
-> - `hold`: Specifies how many steps (e.g. `hold=1.0` = 1 full step duration) the fixture stays clamped at 100% full brightness before fading. Defaults to `0.0`.
-> - `tail`: Specifies how many steps/fixtures the brightness takes to decay smoothly to zero after the hold duration ends.
-> - `hold=1.0, tail=2.0`: Fixture stays at 100% for 1 full step, then fades over the following 2 steps.
-> - `hold=1.0, tail=0.0`: A solid, sharp moving block of light that stays on for 1 full step and cuts off cleanly with no decay trail.
+> **Spatial Envelope Parameters (`lead`, `hold`, `tail`)**:
+> - `lead`: Number of steps/fixtures ahead over which brightness ramps smoothly from 0.0 to 1.0 (attack / ramp-in). Defaults to `0.0`.
+> - `hold`: Number of steps (e.g. `hold=1.0` = 1 full step duration) the fixture stays clamped at 100% full brightness before fading. Defaults to `0.0`.
+> - `tail`: Number of steps/fixtures behind over which brightness decays smoothly from 1.0 down to 0.0 (decay / ramp-out).
+>
+> **Envelope Shapes**:
+> - `lead=1.0, hold=0.0, tail=1.0`: Perfectly symmetric triangular/bell wave traveling across the fixtures.
+> - `lead=1.0, hold=1.0, tail=2.0`: Smooth trapezoidal comet: soft lead-in ramp, solid 100% sustained core, and an elongated fading tail.
+> - `lead=0.0, hold=1.0, tail=0.0`: Solid, sharp moving block of light that stays on for 1 full step with zero ramp-in or decay.
 
 > [!NOTE]
 > **Circular Loops vs. Ping-Pong Bounces**:
