@@ -232,13 +232,14 @@ wave = PARS(Rainbow(duration=2.4).spread())
 
 ### Marquee Chases (`Chase`)
 
-`Chase` creates a classic marquee sweep across fixtures with customizable speed, trail falloff, and background glow:
+`Chase` creates a classic marquee sweep across fixtures with customizable speed, hold time, trail falloff, and background glow:
 
 ```python
 chase = Chase(
     color=Color.YELLOW,
     step_duration=0.15,
-    tail=2.0,                                    # Soft 2-fixture decay trail
+    hold=1.0,                                    # Hold fixture at 100% full brightness for 1 step duration
+    tail=2.0,                                    # Soft 2-fixture decay trail after the hold window
     background=Color.from_hex("#0d0033"),        # Deep indigo ambient background
 ).pingpong()                                     # Bounce left <-> right cleanly across stage
 
@@ -248,10 +249,17 @@ scene = PARS(chase @ 2.4)
 ![Ping-Pong Marquee Chase with Tail](./images/04_chase_pingpong.gif)
 
 > [!NOTE]
+> **Hold & Tail Parameters**:
+> - `hold`: Specifies how many steps (e.g. `hold=1.0` = 1 full step duration) the fixture stays clamped at 100% full brightness before fading. Defaults to `0.0`.
+> - `tail`: Specifies how many steps/fixtures the brightness takes to decay smoothly to zero after the hold duration ends.
+> - `hold=1.0, tail=2.0`: Fixture stays at 100% for 1 full step, then fades over the following 2 steps.
+> - `hold=1.0, tail=0.0`: A solid, sharp moving block of light that stays on for 1 full step and cuts off cleanly with no decay trail.
+
+> [!NOTE]
 > **Circular Loops vs. Ping-Pong Bounces**:
 > - `Chase(..., wrap=True)` uses circular modulo arithmetic—ideal for circular trusses or looping marquee rings where the trail wraps around from fixture 0 back into fixture 7.
 > - `Chase(..., wrap=False)` plays a single linear sweep from left to right.
-> - `chase.pingpong()` (returning a `PingPongChase`) automatically bounces cleanly across the stage ($0 \to 1 \dots \to N-1 \to N-2 \dots \to 1$) without double-hitting turnaround fixtures, reflecting immediately with complete spatial symmetry and smooth decay tails.
+> - `chase.pingpong()` (returning a `PingPongChase`) automatically bounces cleanly across the stage ($0 \to 1 \dots \to N-1 \to N-2 \dots \to 1$) without double-hitting turnaround fixtures, reflecting immediately with complete spatial symmetry and smooth decay tails (forwarding any `hold` and `tail` settings).
 
 ### Stagger and Mirror Transforms
 

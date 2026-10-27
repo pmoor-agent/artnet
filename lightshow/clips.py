@@ -827,6 +827,7 @@ class Chase(Clip):
         step_duration: float = 0.25,
         *,
         background: Optional[Union[Color, float]] = Color.BLACK,
+        hold: float = 0.0,
         tail: float = 0.0,
         num_steps: int = 4,
         wrap: bool = True,
@@ -837,7 +838,8 @@ class Chase(Clip):
         else:
             self.background = background
         self.step_duration = float(step_duration)
-        self.tail = max(0.0, tail)
+        self.hold = max(0.0, float(hold))
+        self.tail = max(0.0, float(tail))
         self.num_steps = num_steps
         self.wrap = wrap
         self.duration = self.step_duration * self.num_steps
@@ -851,7 +853,7 @@ class Chase(Clip):
         else:
             pos = (t / self.duration) * n
 
-        if self.tail <= 0.0:
+        if self.tail <= 0.0 and self.hold <= 0.0:
             active = (int(pos) == (fixture % n)) if self.wrap else (int(pos) == fixture)
             if active:
                 return Patch(color=self.color)
@@ -859,13 +861,21 @@ class Chase(Clip):
 
         if self.wrap:
             dist = (pos - fixture) % n
-            intensity = max(0.0, 1.0 - dist / (1.0 + self.tail))
         else:
             dist = pos - fixture
-            if dist < -1e-9 or dist > (1.0 + self.tail):
-                intensity = 0.0
+
+        if dist < -1e-9:
+            intensity = 0.0
+        else:
+            d = max(0.0, dist)
+            if d <= self.hold:
+                intensity = 1.0
             else:
-                intensity = max(0.0, 1.0 - max(0.0, dist) / (1.0 + self.tail))
+                decay_span = self.tail if self.hold > 0.0 else (1.0 + self.tail)
+                if decay_span <= 0.0 or (d - self.hold) > decay_span:
+                    intensity = 0.0
+                else:
+                    intensity = max(0.0, 1.0 - (d - self.hold) / decay_span)
 
         if self.background is not None:
             return Patch(color=self.background.lerp(self.color, intensity))
@@ -873,12 +883,18 @@ class Chase(Clip):
             return Patch(color=self.color * intensity)
         return Patch()
 
-    def pingpong(self, num_steps: Optional[int] = None, wrap: bool = True) -> PingPongChase:
+    def pingpong(
+        self,
+        num_steps: Optional[int] = None,
+        wrap: bool = True,
+        hold: Optional[float] = None,
+    ) -> PingPongChase:
         """Step back and forth through fixtures without repeating turnaround endpoints."""
         return PingPongChase(
             self.color,
             self.step_duration,
             background=self.background,
+            hold=self.hold if hold is None else hold,
             tail=self.tail,
             num_steps=self.num_steps if num_steps is None else num_steps,
             wrap=wrap,
@@ -900,6 +916,7 @@ class PingPongChase(Clip):
         step_duration: float = 0.25,
         *,
         background: Optional[Union[Color, float]] = Color.BLACK,
+        hold: float = 0.0,
         tail: float = 0.0,
         num_steps: int = 4,
         wrap: bool = True,
@@ -910,7 +927,8 @@ class PingPongChase(Clip):
         else:
             self.background = background
         self.step_duration = float(step_duration)
-        self.tail = max(0.0, tail)
+        self.hold = max(0.0, float(hold))
+        self.tail = max(0.0, float(tail))
         self.num_steps = max(1, int(num_steps))
         self.bounce_steps = 2 * (self.num_steps - 1) if self.num_steps > 1 else 1
         self.duration = self.step_duration * self.bounce_steps
@@ -935,7 +953,7 @@ class PingPongChase(Clip):
         if 0 < fixture < m:
             trigs.append((cycle_steps - fixture) * step_dt)
 
-        if self.tail <= 0.0:
+        if self.tail <= 0.0 and self.hold <= 0.0:
             for tr in trigs:
                 if self.wrap:
                     dt = (local_t - tr) % period
@@ -950,6 +968,7 @@ class PingPongChase(Clip):
             return Patch(color=self.background) if self.background is not None else Patch()
 
         intensity = 0.0
+        decay_span = self.tail if self.hold > 0.0 else (1.0 + self.tail)
         for tr in trigs:
             if self.wrap:
                 for dt_raw in (local_t - tr, local_t + period - tr):
@@ -958,16 +977,26 @@ class PingPongChase(Clip):
                         dt = 0.0
                     if dt >= 0.0:
                         d_steps = dt / step_dt
-                        if d_steps <= 1.0 + self.tail:
-                            intensity = max(intensity, 1.0 - d_steps / (1.0 + self.tail))
+                        if d_steps <= self.hold:
+                            intensity = max(intensity, 1.0)
+                        elif decay_span > 0.0 and (d_steps - self.hold) <= decay_span:
+                            intensity = max(intensity, 1.0 - (d_steps - self.hold) / decay_span)
             else:
                 dt = local_t - tr
                 if -1e-9 <= dt < 0.0:
                     dt = 0.0
                 if dt >= 0.0:
                     d_steps = dt / step_dt
-                    if d_steps <= 1.0 + self.tail:
-                        intensity = max(intensity, 1.0 - d_steps / (1.0 + self.tail))
+                    if d_steps <= self.hold:
+                        intensity = max(intensity, 1.0)
+                    elif decay_span > 0.0 and (d_steps - self.hold) <= decay_span:
+                        intensity = max(intensity, 1.0 - (d_steps - self.hold) / decay_span)
+
+        if self.background is not None:
+            return Patch(color=self.background.lerp(self.color, intensity))
+        if intensity > 0.0:
+            return Patch(color=self.color * intensity)
+        return Patch()
 
         if self.background is not None:
             return Patch(color=self.background.lerp(self.color, intensity))

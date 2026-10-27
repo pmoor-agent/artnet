@@ -328,6 +328,64 @@ class TestLightshow(unittest.TestCase):
         self.assertEqual(pp_sharp.eval(dur_sharp / 2.0 + step_sharp, fixture=6, total_fixtures=8).color, Color.WHITE)
         self.assertEqual(pp_sharp.eval(dur_sharp / 2.0 + step_sharp, fixture=7, total_fixtures=8).color, Color(0, 0, 0))
 
+    def test_chase_hold_duration_and_pingpong(self) -> None:
+        """Verify Chase and PingPongChase 'hold' parameter keeps spot at 100% before decay tail begins."""
+        # 1. Linear Chase with hold=1.0 and tail=2.0
+        chase_hold = Chase(Color.WHITE, step_duration=0.2, hold=1.0, tail=2.0, num_steps=8, wrap=False)
+        self.assertEqual(chase_hold.hold, 1.0)
+        self.assertEqual(chase_hold.tail, 2.0)
+
+        # At t=0.0 (d=0.0): fixture 0 is 100%
+        self.assertEqual(chase_hold.eval(0.0, fixture=0, total_fixtures=8).color, Color.WHITE)
+        # At t=0.1 (pos=0.5, d=0.5 <= hold): fixture 0 is still held at 100%!
+        self.assertEqual(chase_hold.eval(0.1, fixture=0, total_fixtures=8).color, Color.WHITE)
+        # At t=0.2 (pos=1.0, d=1.0 <= hold): fixture 0 is held at 100% until end of hold window
+        self.assertEqual(chase_hold.eval(0.2, fixture=0, total_fixtures=8).color, Color.WHITE)
+        # At t=0.3 (pos=1.5, d=1.5 > hold 1.0, tail=2.0): intensity = 1.0 - 0.5/2.0 = 0.75
+        p_fade1 = chase_hold.eval(0.3, fixture=0, total_fixtures=8)
+        self.assertAlmostEqual(p_fade1.color.r, 0.75, places=3)
+        # At t=0.4 (pos=2.0, d=2.0): intensity = 1.0 - 1.0/2.0 = 0.50
+        p_fade2 = chase_hold.eval(0.4, fixture=0, total_fixtures=8)
+        self.assertAlmostEqual(p_fade2.color.r, 0.50, places=3)
+        # At t=0.6 (pos=3.0, d=3.0 = hold + tail): intensity = 0.00
+        p_fade3 = chase_hold.eval(0.6, fixture=0, total_fixtures=8)
+        self.assertAlmostEqual(p_fade3.color.r, 0.00, places=3)
+        # At t=0.7 (pos=3.5 > hold + tail): intensity = 0.00
+        self.assertEqual(chase_hold.eval(0.7, fixture=0, total_fixtures=8).color, Color.BLACK)
+
+        # 2. Fractional hold: hold=0.5, tail=1.0
+        chase_frac = Chase(Color.WHITE, step_duration=0.2, hold=0.5, tail=1.0, num_steps=4, wrap=False)
+        self.assertEqual(chase_frac.eval(0.08, fixture=0, total_fixtures=4).color, Color.WHITE)  # pos=0.4 <= 0.5
+        p_frac = chase_frac.eval(0.15, fixture=0, total_fixtures=4)  # pos=0.75 -> 1.0 - 0.25/1.0 = 0.75
+        self.assertAlmostEqual(p_frac.color.r, 0.75, places=3)
+
+        # 3. Sharp hold without decay tail: hold=1.0, tail=0.0
+        chase_sharp_hold = Chase(Color.WHITE, step_duration=0.2, hold=1.0, tail=0.0, num_steps=4, wrap=False)
+        self.assertEqual(chase_sharp_hold.eval(0.10, fixture=0, total_fixtures=4).color, Color.WHITE)
+        self.assertEqual(chase_sharp_hold.eval(0.20, fixture=0, total_fixtures=4).color, Color.WHITE)
+        self.assertEqual(chase_sharp_hold.eval(0.22, fixture=0, total_fixtures=4).color, Color.BLACK)
+
+        # 4. PingPongChase forwards hold parameter and preserves full steam duration
+        pp = Chase(Color.WHITE, step_duration=0.1, hold=1.0, tail=2.0, num_steps=8).pingpong()
+        self.assertEqual(pp.hold, 1.0)
+        self.assertEqual(pp.tail, 2.0)
+        dur = pp.duration
+        step_dt = dur / 14.0
+
+        # Turnaround at PAR 7 (t = dur / 2)
+        self.assertEqual(pp.eval(dur / 2.0, fixture=7, total_fixtures=8).color, Color.WHITE)
+        # Half step into return path: PAR 7 remains held at 100%
+        self.assertEqual(pp.eval(dur / 2.0 + 0.5 * step_dt, fixture=7, total_fixtures=8).color, Color.WHITE)
+        # 1 step into return path: PAR 6 is triggered at 100%, and PAR 7 is still at 100% (hold window ends)
+        self.assertEqual(pp.eval(dur / 2.0 + 1.0 * step_dt, fixture=6, total_fixtures=8).color, Color.WHITE)
+        self.assertEqual(pp.eval(dur / 2.0 + 1.0 * step_dt, fixture=7, total_fixtures=8).color, Color.WHITE)
+        # 2 steps into return path (1 step of decay): PAR 7 drops to 50%
+        p7_decay1 = pp.eval(dur / 2.0 + 2.0 * step_dt, fixture=7, total_fixtures=8)
+        self.assertAlmostEqual(p7_decay1.color.r, 0.50, places=3)
+        # 3 steps into return path (2 steps of decay = tail reached): PAR 7 is 0.00
+        p7_decay2 = pp.eval(dur / 2.0 + 3.0 * step_dt, fixture=7, total_fixtures=8)
+        self.assertAlmostEqual(p7_decay2.color.r, 0.00, places=3)
+
     def test_clip_and_scene_time_slicing(self) -> None:
         """Verify time slicing clip[start:stop] and scene[start:stop] with repeating."""
         from lightshow import Rainbow, SliceClip, SliceScene
