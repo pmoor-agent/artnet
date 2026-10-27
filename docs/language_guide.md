@@ -522,14 +522,22 @@ from my_rig import STAGE, PARS
 ```
 
 ### Interactive Scrubber Widget with Live DMX Inspector
-Evaluate any scene in an interactive HTML5/JS scrubber with frame-stepping buttons, slider, and an optional synchronized live DMX frame table:
+Evaluate any scene or clip in an interactive HTML5/JS scrubber with frame-stepping buttons, slider, and an optional synchronized live DMX frame table:
 
 ```python
 # Interactive scrubber with 2D stage visualizer and transport controls (DMX panel starts collapsed):
 STAGE.inspect(mini_show, duration=3.0, fps=15)
 
-# Or inspect any Scene directly without a pre-configured Stage:
+# Inspect any Scene directly without a Stage (automatically expands to 100% of the notebook width!):
 mini_show.inspect(duration=3.0, fps=15)
+
+# Inspect any Clip directly across 4 fixtures:
+chase = Chase(Color.RED, duration=2.0)
+chase.inspect(fixtures=4, duration=2.0, fps=15)
+
+# Explicitly set width in pixels or percentage:
+mini_show.inspect(width=800)       # Max width 800px
+mini_show.inspect(width="100%")    # Full notebook cell width (default for direct inspection)
 
 # Start with the DMX table already unfolded:
 STAGE.inspect(mini_show, dmx_collapsed=False)
@@ -648,7 +656,8 @@ stop_stream()
 | `clip.jitter_hue(amount, speed)` | Jitter hue smoothly in HSV space with organic noise. Available on `Clip` and `Scene`. |
 | `clip.shift_hsv(dh, ds, dv)` | Shift hue, saturation, and value relative to base color. Available on `Clip` and `Scene`. |
 | `scene.dmx(t=0.0)` | Inspect raw DMX frame and channel values at timestamp `t` with colored badges and faint 0s. |
-| `scene.inspect(...)` | Interactive scrubber with time slider, frame stepping (`◀ Prev` / `Next ▶`), and live DMX table. |
+| `scene.inspect(...)` | Interactive scrubber with time slider, frame stepping (`◀ Prev` / `Next ▶`), live DMX table, and automatic 100% notebook width. |
+| `clip.inspect(...)` | Inspect any `Clip` directly across $N$ fixtures with time slider and synchronized DMX frames. |
 | `clip.reverse()` | Invert playback direction (equivalent to `~clip`). |
 | `clip.mirror()` | Symmetrically reflect animation from center outward. |
 | `clip.loop(n=inf)` | Repeat clip $n$ times (default infinite). |

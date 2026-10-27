@@ -111,6 +111,30 @@ def _time_hash() -> int:
     return int(time.time() * 1000) % 10000000
 
 
+def parse_width(width: Union[int, float, str, None], default_viewbox: int = 1000) -> tuple[int, str]:
+    """Parse a width parameter into (viewbox_width, css_max_width).
+
+    Returns:
+        tuple[int, str]: (integer viewBox coordinate width, CSS max-width string).
+    """
+    if width is None or width == "100%" or width == "auto":
+        return default_viewbox, "100%"
+    if isinstance(width, (int, float)):
+        w_int = max(300, int(width))
+        return w_int, f"{w_int}px"
+    if isinstance(width, str):
+        w_str = width.strip().lower()
+        if w_str.endswith("px"):
+            try:
+                w_int = max(300, int(w_str[:-2]))
+                return w_int, f"{w_int}px"
+            except ValueError:
+                pass
+        elif w_str.endswith("%"):
+            return default_viewbox, width
+    return default_viewbox, "100%"
+
+
 # =============================================================================
 # 2. Channel Role Classification & Metadata
 # =============================================================================
@@ -898,6 +922,7 @@ def render_interactive_inspector(
     stage: Any = None,
     duration: Optional[float] = None,
     fps: float = 20.0,
+    width: Optional[Union[int, str]] = None,
     show_dmx: bool = True,
     dmx_collapsed: bool = True,
     max_channel: Optional[int] = None,
@@ -919,15 +944,22 @@ def render_interactive_inspector(
         for i in range(frame_count):
             t = i * step_dt
             visualizer_frames.append(str(stage.render_svg(scene, t=t, fps=fps)))
-        max_w = getattr(stage, "width", 800)
+        target_w = width if width is not None else getattr(stage, "width", 800)
+        viewbox_w, css_max_w = parse_width(target_w, default_viewbox=getattr(stage, "width", 800))
     else:
-        # Default synthesized multi-track timeline ribbon if no Stage provided
+        # Default synthesized multi-track timeline ribbon if no Stage provided (defaults to "100%" notebook width)
+        target_w = width if width is not None else "100%"
+        viewbox_w, css_max_w = parse_width(target_w, default_viewbox=1000)
         from .jupyter import render_scene_timeline_svg
         for i in range(frame_count):
             t = i * step_dt
-            # Render scene SVG with moving playhead cursor
-            visualizer_frames.append(str(render_scene_timeline_svg(scene, duration=show_dur, current_time=t)))
-        max_w = 800
+            # Render scene SVG with moving playhead cursor matching target width
+            visualizer_frames.append(str(render_scene_timeline_svg(
+                scene,
+                duration=show_dur,
+                width=target_w,
+                current_time=t,
+            )))
 
     # 2. Pre-compute DMX byte frames
     ch_meta, fix_meta, universe_size = extract_channel_metadata(
@@ -982,8 +1014,8 @@ def render_interactive_inspector(
 
     html_body = f"""
     {DMX_INSPECTOR_CSS}
-    <div id="{widget_id}" class="{container_cls}" style="max-width: {max_w}px; background: #0b0f17; border: 1px solid #1e293b; 
-                border-radius: 8px; padding: 12px; margin: 10px 0; font-family: system-ui, sans-serif;">
+    <div id="{widget_id}" class="{container_cls}" style="width: 100%; max-width: {css_max_w}; background: #0b0f17; border: 1px solid #1e293b; 
+                border-radius: 8px; padding: 12px; margin: 10px 0; box-sizing: border-box; font-family: system-ui, sans-serif;">
         <!-- Visualizer Frame View -->
         <div id="{widget_id}_view">
             {visualizer_frames[0]}

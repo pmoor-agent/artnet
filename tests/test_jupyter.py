@@ -267,6 +267,73 @@ class TestJupyterIntegration(unittest.TestCase):
         self.assertNotIn(f"{id2}_dmx", w1)
         self.assertNotIn(f"{id1}_dmx", w2)
 
+    def test_width_scaling_and_clip_inspect(self) -> None:
+        """Verify responsive 100% width default and manual width scaling across clips, scenes, and inspector."""
+        from lightshow import Rainbow, Hold, Color
+        from my_rig import PARS, STAGE
+        from lightshow.jupyter import (
+            parse_width,
+            render_clip_timeline_svg,
+            render_scene_timeline_svg,
+            StageScrubberView,
+        )
+
+        # 1. parse_width helper behavior
+        self.assertEqual(parse_width(None), (1000, "100%"))
+        self.assertEqual(parse_width("100%"), (1000, "100%"))
+        self.assertEqual(parse_width("auto"), (1000, "100%"))
+        self.assertEqual(parse_width(800), (800, "800px"))
+        self.assertEqual(parse_width("1200px"), (1200, "1200px"))
+        self.assertEqual(parse_width("75%"), (1000, "75%"))
+        # Clamped minimum width
+        self.assertEqual(parse_width(100), (300, "300px"))
+
+        clip = Rainbow(duration=2.0)
+        scene = PARS(clip)
+
+        # 2. SVG ribbon default (100% responsive) vs explicit width
+        clip_svg_default = render_clip_timeline_svg(clip)
+        self.assertIn("max-width: 100%", clip_svg_default)
+        self.assertIn('viewBox="0 0 1000', clip_svg_default)
+        self.assertIn("style=\"width: 100%; height: auto;", clip_svg_default)
+
+        clip_svg_custom = render_clip_timeline_svg(clip, width=800)
+        self.assertIn("max-width: 800px", clip_svg_custom)
+        self.assertIn('viewBox="0 0 800', clip_svg_custom)
+
+        scene_svg_default = render_scene_timeline_svg(scene)
+        self.assertIn("max-width: 100%", scene_svg_default)
+        self.assertIn('viewBox="0 0 1000', scene_svg_default)
+
+        scene_svg_custom = render_scene_timeline_svg(scene, width=1200)
+        self.assertIn("max-width: 1200px", scene_svg_custom)
+        self.assertIn('viewBox="0 0 1200', scene_svg_custom)
+
+        # 3. Direct scene.inspect() default (100%) vs custom width
+        scrubber_scene_default = scene.inspect(duration=1.0, fps=5.0)
+        self.assertIn("max-width: 100%", scrubber_scene_default)
+        self.assertIn('viewBox="0 0 1000', scrubber_scene_default)
+
+        scrubber_scene_custom = scene.inspect(duration=1.0, fps=5.0, width=800)
+        self.assertIn("max-width: 800px", scrubber_scene_custom)
+        self.assertIn('viewBox="0 0 800', scrubber_scene_custom)
+
+        # 4. Direct clip.inspect()
+        scrubber_clip = clip.inspect(fixtures=4, duration=1.0, fps=5.0)
+        self.assertIsInstance(scrubber_clip, StageScrubberView)
+        self.assertIn("max-width: 100%", scrubber_clip)
+        self.assertIn("◀ Prev", scrubber_clip)
+        self.assertIn("Next ▶", scrubber_clip)
+        self.assertIn("dmx-inspector", scrubber_clip)
+
+        scrubber_clip_custom = clip.inspect(fixtures=4, duration=1.0, fps=5.0, width=1200)
+        self.assertIn("max-width: 1200px", scrubber_clip_custom)
+        self.assertIn('viewBox="0 0 1200', scrubber_clip_custom)
+
+        # 5. STAGE.inspect() with custom width
+        scrubber_stage_custom = STAGE.inspect(scene, duration=1.0, fps=5.0, width=1200)
+        self.assertIn("max-width: 1200px", scrubber_stage_custom)
+
 
 if __name__ == "__main__":
     unittest.main()

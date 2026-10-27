@@ -292,6 +292,36 @@ class Clip:
             dimmer_scale=dimmer_scale,
         )
 
+    def inspect(
+        self,
+        *,
+        fixtures: int = 4,
+        duration: Optional[float] = None,
+        fps: float = 20.0,
+        width: Optional[Union[int, str]] = None,
+        show_dmx: bool = True,
+        dmx_collapsed: bool = True,
+        max_channel: Optional[int] = None,
+        hide_zeros: bool = False,
+    ) -> Any:
+        """Interactive Jupyter widget with animated visualizer, transport controls, and live DMX table."""
+        from .fixtures import FixtureGroup, RGB, Channel
+        elements = [
+            {"color": RGB(1 + i * 4), "white": Channel(4 + i * 4)}
+            for i in range(fixtures)
+        ]
+        group = FixtureGroup("fixtures", elements)
+        scene = group(self)
+        return scene.inspect(
+            duration=duration,
+            fps=fps,
+            width=width,
+            show_dmx=show_dmx,
+            dmx_collapsed=dmx_collapsed,
+            max_channel=max_channel,
+            hide_zeros=hide_zeros,
+        )
+
 
 def dim(factor: float, target, *, attr: Optional[str] = None):
     """Composable combinator that dims a `Clip` or a `Scene` by `factor` (e.g. `dim(0.3, strobe_anim)`).

@@ -43,6 +43,7 @@ from lightshow.profiles import (
     dmx,
     inspect_dmx,
 )
+from lightshow.inspector import parse_width
 
 
 # =============================================================================
@@ -67,15 +68,17 @@ def render_clip_timeline_svg(
     *,
     duration: Optional[float] = None,
     fixtures: int = 4,
-    width: int = 700,
+    width: Union[int, str, None] = None,
     steps: int = 120,
     current_time: Optional[float] = None,
-) -> str:
+) -> HTMLView:
     """Render an SVG timeline strip visualizing `clip` across `fixtures` fixtures."""
     is_inf = math.isinf(clip.duration)
     show_dur = (6.0 if is_inf else clip.duration) if duration is None else duration
     if show_dur <= 0:
         show_dur = 1.0
+
+    viewbox_w, css_max_w = parse_width(width, default_viewbox=1000)
 
     track_height = 20
     track_gap = 4
@@ -83,14 +86,14 @@ def render_clip_timeline_svg(
     ruler_height = 22
     total_height = header_height + fixtures * (track_height + track_gap) + ruler_height + 10
     left_margin = 70
-    plot_width = width - left_margin - 16
+    plot_width = viewbox_w - left_margin - 16
 
     # Sample time steps
     svg_elements: list[str] = []
 
     # Background card
     svg_elements.append(
-        f'<rect width="{width}" height="{total_height}" rx="8" '
+        f'<rect width="{viewbox_w}" height="{total_height}" rx="8" '
         f'fill="#0e1117" stroke="#262c36" stroke-width="1.2"/>'
     )
 
@@ -102,8 +105,8 @@ def render_clip_timeline_svg(
         f'font-size="13" font-weight="600">{clip_name}</text>'
     )
     svg_elements.append(
-        f'<rect x="{width - 120}" y="10" width="106" height="20" rx="10" fill="#1f2937" stroke="#374151" stroke-width="1"/>'
-        f'<text x="{width - 67}" y="24" fill="#9ca3af" font-family="system-ui, sans-serif" '
+        f'<rect x="{viewbox_w - 120}" y="10" width="106" height="20" rx="10" fill="#1f2937" stroke="#374151" stroke-width="1"/>'
+        f'<text x="{viewbox_w - 67}" y="24" fill="#9ca3af" font-family="system-ui, sans-serif" '
         f'font-size="11" text-anchor="middle">{dur_label}</text>'
     )
 
@@ -177,9 +180,9 @@ def render_clip_timeline_svg(
 
     content = "".join(svg_elements)
     return HTMLView(
-        f'<div style="max-width: {width}px; margin: 8px 0;">'
-        f'<svg viewBox="0 0 {width} {total_height}" width="100%" height="{total_height}" '
-        f'xmlns="http://www.w3.org/2000/svg" style="border-radius: 8px; display: block;">'
+        f'<div style="width: 100%; max-width: {css_max_w}; margin: 8px 0; box-sizing: border-box;">'
+        f'<svg viewBox="0 0 {viewbox_w} {total_height}" style="width: 100%; height: auto; max-width: 100%; border-radius: 8px; display: block;" '
+        f'xmlns="http://www.w3.org/2000/svg">'
         f'{content}'
         f'</svg></div>'
     )
@@ -189,19 +192,21 @@ def render_scene_timeline_svg(
     scene: Scene,
     *,
     duration: Optional[float] = None,
-    width: int = 700,
+    width: Union[int, str, None] = None,
     steps: int = 120,
     current_time: Optional[float] = None,
-) -> str:
+) -> HTMLView:
     """Render an SVG timeline strip visualizing a composable `Scene` across all active groups."""
     is_inf = math.isinf(scene.duration)
     show_dur = (6.0 if is_inf else scene.duration) if duration is None else duration
     if show_dur <= 0:
         show_dur = 1.0
 
+    viewbox_w, css_max_w = parse_width(width, default_viewbox=1000)
+
     groups = scene.groups()
     if not groups:
-        return "<div><em>Empty Scene</em></div>"
+        return HTMLView("<div><em>Empty Scene</em></div>")
 
     # Flatten elements
     lanes: list[tuple[str, int, FixtureGroup, int]] = []
@@ -224,10 +229,10 @@ def render_scene_timeline_svg(
     ruler_height = 22
     total_height = header_height + len(lanes) * (track_height + track_gap) + ruler_height + 10
     left_margin = 110
-    plot_width = width - left_margin - 16
+    plot_width = viewbox_w - left_margin - 16
 
     svg_elements: list[str] = [
-        f'<rect width="{width}" height="{total_height}" rx="8" '
+        f'<rect width="{viewbox_w}" height="{total_height}" rx="8" '
         f'fill="#0e1117" stroke="#262c36" stroke-width="1.2"/>'
     ]
 
@@ -238,8 +243,8 @@ def render_scene_timeline_svg(
         f'font-size="13" font-weight="600">Scene ({scene_title})</text>'
     )
     svg_elements.append(
-        f'<rect x="{width - 120}" y="10" width="106" height="20" rx="10" fill="#1f2937" stroke="#374151" stroke-width="1"/>'
-        f'<text x="{width - 67}" y="24" fill="#9ca3af" font-family="system-ui, sans-serif" '
+        f'<rect x="{viewbox_w - 120}" y="10" width="106" height="20" rx="10" fill="#1f2937" stroke="#374151" stroke-width="1"/>'
+        f'<text x="{viewbox_w - 67}" y="24" fill="#9ca3af" font-family="system-ui, sans-serif" '
         f'font-size="11" text-anchor="middle">{dur_label}</text>'
     )
 
@@ -338,9 +343,9 @@ def render_scene_timeline_svg(
 
     content = "".join(svg_elements)
     return HTMLView(
-        f'<div style="max-width: {width}px; margin: 8px 0;">'
-        f'<svg viewBox="0 0 {width} {total_height}" width="100%" height="{total_height}" '
-        f'xmlns="http://www.w3.org/2000/svg" style="border-radius: 8px; display: block;">'
+        f'<div style="width: 100%; max-width: {css_max_w}; margin: 8px 0; box-sizing: border-box;">'
+        f'<svg viewBox="0 0 {viewbox_w} {total_height}" style="width: 100%; height: auto; max-width: 100%; border-radius: 8px; display: block;" '
+        f'xmlns="http://www.w3.org/2000/svg">'
         f'{content}'
         f'</svg></div>'
     )
