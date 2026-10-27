@@ -84,6 +84,16 @@ class TestJupyterIntegration(unittest.TestCase):
         self.assertIsNotNone(HTMLFormatter()(scrubber))
         self.assertIsNone(JavascriptFormatter()(scrubber))
 
+        # 3. Verify uniform periodic frame sampling without boundary duplication (no t=1.00s duplicate of t=0.00s)
+        import json, re
+        m = re.search(r'const frames = (\[.*?\]);', scrubber, re.DOTALL)
+        self.assertIsNotNone(m)
+        frames = json.loads(m.group(1))
+        self.assertEqual(len(frames), 10)  # 1.0s @ 10fps = 10 frames
+        frame_times = [re.search(r't = ([\d\.]+)s', f).group(1) for f in frames]
+        self.assertEqual(frame_times, ['0.00', '0.10', '0.20', '0.30', '0.40', '0.50', '0.60', '0.70', '0.80', '0.90'])
+        self.assertNotIn('1.00', frame_times)  # 1.00s would duplicate 0.00s when looped
+
     def test_sliced_fixture_groups_in_layer_scene_timeline(self) -> None:
         """Verify multiple slices of the same parent group render all lanes with clean indices in Jupyter."""
         from lightshow.jupyter import Color, Chase, render_scene_timeline_svg

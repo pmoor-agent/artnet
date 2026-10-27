@@ -544,64 +544,14 @@ class Stage:
             show_dur = 1.0
 
         # Pre-render frames for instant client-side scrubbing
-        frame_count = max(2, int(show_dur * fps))
+        frame_count = max(1, round(show_dur * fps))
         frames = []
         for i in range(frame_count):
-            t = (i / (frame_count - 1)) * show_dur
+            t = i * (show_dur / frame_count)
             frames.append(str(self.render_svg(scene, t=t, fps=fps)))
 
         widget_id = f"stage_scrubber_{abs(hash(str(scene) + str(time_hash())))}"
         frames_json = json.dumps(frames)
-
-        js_logic = f"""
-(function() {{
-    const initWidget = function() {{
-        const widget = document.getElementById("{widget_id}");
-        if (!widget || widget.__initialized) return;
-        widget.__initialized = true;
-
-        const frames = {frames_json};
-        const slider = document.getElementById("{widget_id}_slider");
-        const view = document.getElementById("{widget_id}_view");
-        const label = document.getElementById("{widget_id}_label");
-        const playBtn = document.getElementById("{widget_id}_play");
-        if (!slider || !view || !label || !playBtn) return;
-
-        const totalDur = {show_dur};
-        let timer = null;
-
-        function update(idx) {{
-            slider.value = idx;
-            view.innerHTML = frames[idx];
-            const t = (idx / (frames.length - 1)) * totalDur;
-            label.innerText = t.toFixed(2) + "s";
-        }}
-
-        slider.oninput = (e) => update(parseInt(e.target.value));
-
-        playBtn.onclick = () => {{
-            if (timer) {{
-                clearInterval(timer);
-                timer = null;
-                playBtn.innerText = "▶ Play";
-            }} else {{
-                playBtn.innerText = "⏸ Pause";
-                timer = setInterval(() => {{
-                    let next = (parseInt(slider.value) + 1) % frames.length;
-                    update(next);
-                }}, 1000 / {fps});
-            }}
-        }};
-    }};
-
-    window["init_{widget_id}"] = initWidget;
-    if (document.readyState === "loading") {{
-        document.addEventListener("DOMContentLoaded", initWidget);
-    }} else {{
-        setTimeout(initWidget, 0);
-    }}
-}})();
-"""
 
         html_body = f"""
         <div id="{widget_id}" style="max-width: {self.width}px; background: #0b0f17; border: 1px solid #1e293b; 
@@ -630,7 +580,7 @@ class Stage:
                 function update(idx) {{
                     slider.value = idx;
                     view.innerHTML = frames[idx];
-                    const t = (idx / (frames.length - 1)) * totalDur;
+                    const t = (idx / frames.length) * totalDur;
                     label.innerText = t.toFixed(2) + "s";
                 }}
 
