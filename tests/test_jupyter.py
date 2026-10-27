@@ -236,6 +236,37 @@ class TestJupyterIntegration(unittest.TestCase):
         self.assertIn("Next ▶", scene_scrubber)
         self.assertIn("dmx-inspector", scene_scrubber)
 
+        # 3. Verify collapsible DMX starts hidden by default
+        self.assertIn("display: none;", scrubber)
+        self.assertIn("📡 DMX ▸", scrubber)
+
+        # When dmx_collapsed=False, it starts expanded
+        expanded_scrubber = STAGE.inspect(scene, duration=1.0, fps=10.0, show_dmx=True, dmx_collapsed=False)
+        self.assertIn("display: block;", expanded_scrubber)
+        self.assertIn("📡 DMX ▾", expanded_scrubber)
+
+    def test_multi_widget_isolation(self) -> None:
+        """Verify multiple inspect widgets in the same session have distinct IDs without DOM collisions."""
+        from my_rig import STAGE, PARS, STROBE_BAR
+        from lightshow.jupyter import Color, Hold
+        import re
+
+        s1 = PARS(Hold(Color.RED, duration=1.0))
+        s2 = STROBE_BAR(Hold(Color.BLUE, duration=1.0))
+
+        w1 = STAGE.inspect(s1, duration=1.0, fps=10.0)
+        w2 = STAGE.inspect(s2, duration=1.0, fps=10.0)
+
+        id1 = re.search(r'id=\"(stage_scrubber_\d+)\"', w1).group(1)
+        id2 = re.search(r'id=\"(stage_scrubber_\d+)\"', w2).group(1)
+        self.assertNotEqual(id1, id2)
+
+        # Verify w1 embeds its own scoped IDs and not w2
+        self.assertIn(f"{id1}_dmx_ch_1", w1)
+        self.assertIn(f"{id2}_dmx_ch_1", w2)
+        self.assertNotIn(f"{id2}_dmx", w1)
+        self.assertNotIn(f"{id1}_dmx", w2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -601,6 +601,7 @@ class Scene:
         duration: Optional[float] = None,
         fps: float = 20.0,
         show_dmx: bool = True,
+        dmx_collapsed: bool = True,
         max_channel: Optional[int] = None,
         hide_zeros: bool = False,
     ) -> Any:
@@ -612,6 +613,7 @@ class Scene:
             duration=duration,
             fps=fps,
             show_dmx=show_dmx,
+            dmx_collapsed=dmx_collapsed,
             max_channel=max_channel,
             hide_zeros=hide_zeros,
         )

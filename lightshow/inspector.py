@@ -727,6 +727,7 @@ def render_dmx_frame_html(
     max_channel: Optional[int] = None,
     hide_zeros: bool = False,
     universe: int = 1,
+    widget_id: Optional[str] = None,
 ) -> DMXFrameView:
     """Render a single static DMX frame snapshot into a rich HTML view."""
     if isinstance(scene_or_dmx, Scene):
@@ -745,7 +746,8 @@ def render_dmx_frame_html(
     if len(dmx_frame) < universe_size:
         dmx_frame.extend([0] * (universe_size - len(dmx_frame)))
 
-    widget_id = f"dmx_view_{abs(hash(str(dmx_frame[:32]) + str(t) + str(_time_hash())))}"
+    if widget_id is None:
+        widget_id = f"dmx_view_{abs(hash(str(dmx_frame[:32]) + str(t) + str(_time_hash())))}"
     active_count = sum(1 for val in dmx_frame if val > 0)
 
     # Build Fixtures HTML
@@ -829,7 +831,7 @@ def render_dmx_frame_html(
         <div class="dmx-toolbar">
             <div class="dmx-title-group">
                 <span class="dmx-title">📡 DMX Universe {universe}</span>
-                <span class="dmx-badge dmx-badge-time">t = {t:.2f}s</span>
+                <span id="{widget_id}_time_badge" class="dmx-badge dmx-badge-time">t = {t:.2f}s</span>
                 <span id="{widget_id}_active_badge" class="dmx-badge dmx-badge-active">{active_count} / {universe_size} active</span>
             </div>
             <div class="dmx-actions">
@@ -897,6 +899,7 @@ def render_interactive_inspector(
     duration: Optional[float] = None,
     fps: float = 20.0,
     show_dmx: bool = True,
+    dmx_collapsed: bool = True,
     max_channel: Optional[int] = None,
     hide_zeros: bool = False,
     universe: int = 1,
@@ -940,6 +943,7 @@ def render_interactive_inspector(
         dmx_frames.append(dmx_list[:universe_size])
 
     widget_id = f"stage_scrubber_{abs(hash(str(scene) + str(_time_hash())))}"
+    dmx_widget_id = f"{widget_id}_dmx"
     frames_json = json.dumps(visualizer_frames)
     dmx_frames_json = json.dumps(dmx_frames)
 
@@ -971,6 +975,7 @@ def render_interactive_inspector(
         max_channel=universe_size,
         hide_zeros=hide_zeros,
         universe=universe,
+        widget_id=dmx_widget_id,
     ) if show_dmx else ""
 
     container_cls = "hide-zeros" if hide_zeros else ""
@@ -992,10 +997,11 @@ def render_interactive_inspector(
             <input id="{widget_id}_slider" type="range" min="0" max="{frame_count - 1}" value="0" 
                    style="flex: 1; cursor: pointer; accent-color: #3b82f6;">
             <span id="{widget_id}_label" style="font-family: monospace; font-size: 12px; color: #94a3b8; min-width: 96px; text-align: right;">0.00s (0/{frame_count - 1})</span>
+            {f'<button id="{widget_id}_toggle_dmx" class="dmx-btn {"active" if not dmx_collapsed else ""}" style="font-size: 11px; padding: 3px 8px; margin-left: 2px;" title="Toggle live DMX channel table">📡 DMX {"▾" if not dmx_collapsed else "▸"}</button>' if show_dmx else ''}
         </div>
 
-        <!-- Synchronized Live DMX Channel Table -->
-        {"<div id='" + widget_id + "_dmx_wrap' style='margin-top: 10px;'>" + str(initial_dmx_view) + "</div>" if show_dmx else ""}
+        <!-- Synchronized Live DMX Channel Table (Collapsible) -->
+        {f'<div id="{widget_id}_dmx_wrap" style="margin-top: 10px; display: {"none" if dmx_collapsed else "block"};">{str(initial_dmx_view)}</div>' if show_dmx else ''}
 
         <script>
         (function() {{
@@ -1009,8 +1015,8 @@ def render_interactive_inspector(
             const playBtn = document.getElementById("{widget_id}_play");
             const prevBtn = document.getElementById("{widget_id}_prev");
             const nextBtn = document.getElementById("{widget_id}_next");
-            const activeBadge = document.querySelector("#{widget_id} .dmx-badge-active");
-            const timeBadge = document.querySelector("#{widget_id} .dmx-badge-time");
+            const toggleDmxBtn = document.getElementById("{widget_id}_toggle_dmx");
+            const dmxWrap = document.getElementById("{widget_id}_dmx_wrap");
 
             if (!slider || !view || !label || !playBtn) return;
             const totalDur = {show_dur};
@@ -1019,89 +1025,116 @@ def render_interactive_inspector(
             const universeSize = {universe_size};
             let timer = null;
 
+            // Cache direct DMX element references for this specific widget instance (prevents cross-cell interference)
+            const dmxPills = {{}};
+            const dmxCells = {{}};
+            for (let i = 0; i < chMeta.length; i++) {{
+                const addr = chMeta[i].addr;
+                dmxPills[addr] = document.getElementById("{dmx_widget_id}_ch_" + addr);
+                dmxCells[addr] = document.getElementById("{dmx_widget_id}_gch_" + addr);
+            }}
+            const dmxSwatches = {{}};
+            const dmxCards = {{}};
+            for (let f = 0; f < fixMeta.length; f++) {{
+                const idx = fixMeta[f].idx;
+                dmxSwatches[idx] = document.getElementById("{dmx_widget_id}_swatch_" + idx);
+                dmxCards[idx] = document.getElementById("{dmx_widget_id}_fix_" + idx);
+            }}
+            const dmxActiveBadge = document.getElementById("{dmx_widget_id}_active_badge");
+            const dmxTimeBadge = document.getElementById("{dmx_widget_id}_time_badge");
+
+            if (toggleDmxBtn && dmxWrap) {{
+                toggleDmxBtn.onclick = function() {{
+                    const isHidden = (dmxWrap.style.display === "none");
+                    dmxWrap.style.display = isHidden ? "block" : "none";
+                    toggleDmxBtn.innerText = isHidden ? "📡 DMX ▾" : "📡 DMX ▸";
+                    toggleDmxBtn.classList.toggle("active", isHidden);
+                }};
+            }}
+
             function update(idx) {{
                 slider.value = idx;
                 view.innerHTML = frames[idx];
                 const t = idx * stepDt;
                 label.innerText = t.toFixed(2) + "s (" + idx + "/" + (frameCount - 1) + ")";
-                if (timeBadge) timeBadge.innerText = "t = " + t.toFixed(2) + "s";
+                if (dmxTimeBadge) dmxTimeBadge.innerText = "t = " + t.toFixed(2) + "s";
 
-                // Update live DMX elements
+                // Update live DMX elements scoped strictly to this widget
                 const dmx = dmxFrames[idx];
-                if (!dmx) return;
+                if (dmx) {{
+                    let activeCount = 0;
+                    for (let i = 0; i < chMeta.length; i++) {{
+                        const cm = chMeta[i];
+                        const addr = cm.addr;
+                        const val = (addr <= dmx.length) ? dmx[addr - 1] : 0;
+                        if (val > 0) activeCount++;
 
-                let activeCount = 0;
-                for (let i = 0; i < chMeta.length; i++) {{
-                    const cm = chMeta[i];
-                    const addr = cm.addr;
-                    const val = (addr <= dmx.length) ? dmx[addr - 1] : 0;
-                    if (val > 0) activeCount++;
+                        // Update Fixture Pill
+                        const pill = dmxPills[addr];
+                        if (pill) {{
+                            const valSpan = pill.querySelector(".ch-val");
+                            if (valSpan) valSpan.innerText = val;
+                            if (val === 0) {{
+                                pill.classList.add("ch-zero");
+                                pill.classList.remove("ch-active");
+                            }} else {{
+                                pill.classList.remove("ch-zero");
+                                pill.classList.add("ch-active");
+                            }}
+                        }}
 
-                    // Update Fixture Pill
-                    const pill = document.getElementById("{widget_id}_ch_" + addr) || document.querySelector("[id$='_ch_" + addr + "']");
-                    if (pill) {{
-                        const valSpan = pill.querySelector(".ch-val");
-                        if (valSpan) valSpan.innerText = val;
-                        if (val === 0) {{
-                            pill.classList.add("ch-zero");
-                            pill.classList.remove("ch-active");
-                        }} else {{
-                            pill.classList.remove("ch-zero");
-                            pill.classList.add("ch-active");
+                        // Update Grid Cell
+                        const cell = dmxCells[addr];
+                        if (cell) {{
+                            const cellVal = cell.querySelector(".cell-val");
+                            if (cellVal) cellVal.innerText = val;
+                            if (val === 0) {{
+                                cell.classList.add("ch-zero");
+                                cell.classList.remove("ch-active");
+                            }} else {{
+                                cell.classList.remove("ch-zero");
+                                cell.classList.add("ch-active");
+                            }}
                         }}
                     }}
 
-                    // Update Grid Cell
-                    const cell = document.getElementById("{widget_id}_gch_" + addr) || document.querySelector("[id$='_gch_" + addr + "']");
-                    if (cell) {{
-                        const cellVal = cell.querySelector(".cell-val");
-                        if (cellVal) cellVal.innerText = val;
-                        if (val === 0) {{
-                            cell.classList.add("ch-zero");
-                            cell.classList.remove("ch-active");
-                        }} else {{
-                            cell.classList.remove("ch-zero");
-                            cell.classList.add("ch-active");
+                    if (dmxActiveBadge) {{
+                        dmxActiveBadge.innerText = activeCount + " / " + universeSize + " active";
+                    }}
+
+                    // Update Fixture Swatches and all-zero states
+                    for (let f = 0; f < fixMeta.length; f++) {{
+                        const fm = fixMeta[f];
+                        const r = (fm.r && fm.r <= dmx.length) ? dmx[fm.r - 1] : 0;
+                        const g = (fm.g && fm.g <= dmx.length) ? dmx[fm.g - 1] : 0;
+                        const b = (fm.b && fm.b <= dmx.length) ? dmx[fm.b - 1] : 0;
+                        const w = (fm.w && fm.w <= dmx.length) ? dmx[fm.w - 1] : 0;
+                        const dim = (fm.dim && fm.dim <= dmx.length) ? dmx[fm.dim - 1] : 255;
+
+                        const dimScale = Math.pow(dim / 255.0, 1.8);
+                        const ro = Math.min(255, Math.round((r + w * 0.95) * dimScale));
+                        const go = Math.min(255, Math.round((g + w * 0.98) * dimScale));
+                        const bo = Math.min(255, Math.round((b + w * 1.00) * dimScale));
+
+                        const swatch = dmxSwatches[fm.idx];
+                        if (swatch) {{
+                            swatch.style.backgroundColor = "rgb(" + ro + "," + go + "," + bo + ")";
+                            swatch.style.boxShadow = (ro > 15 || go > 15 || bo > 15) ? "0 0 8px rgba(" + ro + "," + go + "," + bo + ",0.6)" : "none";
                         }}
-                    }}
-                }}
 
-                if (activeBadge) {{
-                    activeBadge.innerText = activeCount + " / " + universeSize + " active";
-                }}
-
-                // Update Fixture Swatches and all-zero states
-                for (let f = 0; f < fixMeta.length; f++) {{
-                    const fm = fixMeta[f];
-                    const r = (fm.r && fm.r <= dmx.length) ? dmx[fm.r - 1] : 0;
-                    const g = (fm.g && fm.g <= dmx.length) ? dmx[fm.g - 1] : 0;
-                    const b = (fm.b && fm.b <= dmx.length) ? dmx[fm.b - 1] : 0;
-                    const w = (fm.w && fm.w <= dmx.length) ? dmx[fm.w - 1] : 0;
-                    const dim = (fm.dim && fm.dim <= dmx.length) ? dmx[fm.dim - 1] : 255;
-
-                    const dimScale = Math.pow(dim / 255.0, 1.8);
-                    const ro = Math.min(255, Math.round((r + w * 0.95) * dimScale));
-                    const go = Math.min(255, Math.round((g + w * 0.98) * dimScale));
-                    const bo = Math.min(255, Math.round((b + w * 1.00) * dimScale));
-
-                    const swatch = document.getElementById("{widget_id}_swatch_" + fm.idx) || document.querySelector("[id$='_swatch_" + fm.idx + "']");
-                    if (swatch) {{
-                        swatch.style.backgroundColor = "rgb(" + ro + "," + go + "," + bo + ")";
-                        swatch.style.boxShadow = (ro > 15 || go > 15 || bo > 15) ? "0 0 8px rgba(" + ro + "," + go + "," + bo + ",0.6)" : "none";
-                    }}
-
-                    // Check all zero
-                    let fAllZero = true;
-                    for (let a = 0; a < fm.addrs.length; a++) {{
-                        const addr = fm.addrs[a];
-                        if (addr <= dmx.length && dmx[addr - 1] > 0) {{
-                            fAllZero = false;
-                            break;
+                        // Check all zero
+                        const fCard = dmxCards[fm.idx];
+                        if (fCard) {{
+                            let fAllZero = true;
+                            for (let a = 0; a < fm.addrs.length; a++) {{
+                                const aAddr = fm.addrs[a];
+                                if (aAddr <= dmx.length && dmx[aAddr - 1] > 0) {{
+                                    fAllZero = false;
+                                    break;
+                                }}
+                            }}
+                            fCard.classList.toggle("all-zero", fAllZero);
                         }}
-                    }}
-                    const fCard = document.getElementById("{widget_id}_fix_" + fm.idx) || document.querySelector("[id$='_fix_" + fm.idx + "']");
-                    if (fCard) {{
-                        fCard.classList.toggle("all-zero", fAllZero);
                     }}
                 }}
             }}

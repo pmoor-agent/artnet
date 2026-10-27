@@ -522,21 +522,25 @@ from my_rig import STAGE, PARS
 ```
 
 ### Interactive Scrubber Widget with Live DMX Inspector
-Evaluate any scene in an interactive HTML5/JS scrubber with frame-stepping buttons, slider, and synchronized live DMX frame table:
+Evaluate any scene in an interactive HTML5/JS scrubber with frame-stepping buttons, slider, and an optional synchronized live DMX frame table:
 
 ```python
-# Interactive scrubber with 2D stage visualizer, transport buttons, and live DMX table:
+# Interactive scrubber with 2D stage visualizer and transport controls (DMX panel starts collapsed):
 STAGE.inspect(mini_show, duration=3.0, fps=15)
 
 # Or inspect any Scene directly without a pre-configured Stage:
 mini_show.inspect(duration=3.0, fps=15)
+
+# Start with the DMX table already unfolded:
+STAGE.inspect(mini_show, dmx_collapsed=False)
 ```
 
 Controls:
 - `◀ Prev` and `Next ▶`: Step backward or forward by exactly 1 frame.
 - `▶ Play` / `⏸ Pause`: Real-time animated playback.
 - Slider: Scrub smoothly across the timeline.
-- **Live DMX Channel Table**: Updates synchronously on every frame:
+- `📡 DMX ▸`: Toggle button to unfold or collapse the live DMX channel table (starts hidden by default to keep the notebook clean and uncluttered).
+- **Live DMX Channel Table**: When unfolded, updates synchronously on every frame:
   - **RGB channels**: Accurately color-tinted with red, green, and blue glows and role badges.
   - **White channels (`CW` / `WW`)**: Colored with cold white and warm amber glows.
   - **Strobe & Utility channels**: Pitch black background (`#000000`) always, with vivid warning outlines when active.
