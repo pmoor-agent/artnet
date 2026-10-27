@@ -530,6 +530,173 @@ class Stage:
         """Render default stage layout in notebook cell."""
         return str(self.render_svg([0] * 64, t=0.0))
 
+    def render_animated_svg(
+        self,
+        scene: Scene,
+        *,
+        duration: Optional[float] = None,
+        fps: float = 10.0,
+        max_strobe_freq: float = 7.5,
+    ) -> HTMLView:
+        """Render a self-contained animated SVG using standard W3C SMIL animation.
+
+        Plays automatically in modern browsers, markdown previews, <img> tags,
+        and Jupyter notebook cells without external JavaScript or stylesheets.
+        """
+        is_inf = math.isinf(scene.duration)
+        show_dur = (6.0 if is_inf else scene.duration) if duration is None else duration
+        if show_dur <= 0:
+            show_dur = 1.0
+
+        frame_count = max(1, round(show_dur * fps))
+        step_dt = show_dur / frame_count
+        w, h = self.width, self.height
+
+        parts: list[str] = [
+            '<defs>',
+            '<filter id="glow-blur" x="-50%" y="-50%" width="200%" height="200%">',
+            '<feGaussianBlur stdDeviation="6"/>',
+            '</filter>',
+            '</defs>',
+            f'<rect width="{w}" height="{h}" rx="8" fill="#0b0f17" stroke="#1e293b" stroke-width="1.2"/>',
+            f'<line x1="20" y1="{h - 35}" x2="{w - 20}" y2="{h - 35}" stroke="#1e293b" stroke-width="1" stroke-dasharray="4,4"/>',
+            f'<text x="16" y="24" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="13" font-weight="600">{html.escape(self.title)}</text>',
+        ]
+
+        last_id = f"f_anim_{frame_count - 1}"
+
+        for i in range(frame_count):
+            t = i * step_dt
+            canvas = scene.eval_canvas(t)
+            dmx_frame = canvas.to_dmx_list(min_size=64)
+            inner_parts: list[str] = [
+                f'<text x="{w - 16}" y="24" fill="#64748b" font-family="monospace" font-size="11" text-anchor="end">t = {t:.2f}s</text>'
+            ]
+            for fix in self.fixtures:
+                inner_parts.append(fix.render_svg(dmx_frame, t=t, fps=fps, max_strobe_freq=max_strobe_freq))
+            inner = "".join(inner_parts)
+
+            if i == 0:
+                parts.append(
+                    f'<g id="f0">\n'
+                    f'<set id="f_anim_0" attributeName="display" to="inline" begin="0s; {last_id}.end" dur="{step_dt:.3f}s"/>\n'
+                    f'<set attributeName="display" to="none" begin="f_anim_0.end" end="{last_id}.end"/>\n'
+                    f'{inner}\n'
+                    f'</g>\n'
+                )
+            else:
+                parts.append(
+                    f'<g id="f{i}" display="none">\n'
+                    f'<set id="f_anim_{i}" attributeName="display" to="inline" begin="f_anim_{i - 1}.end" dur="{step_dt:.3f}s"/>\n'
+                    f'{inner}\n'
+                    f'</g>\n'
+                )
+
+        content = "".join(parts)
+        return HTMLView(
+            f'<div style="max-width: {w}px; margin: 10px 0;">'
+            f'<svg viewBox="0 0 {w} {h}" width="100%" height="{h}" xmlns="http://www.w3.org/2000/svg" '
+            f'style="border-radius: 8px; display: block; box-shadow: 0 4px 12px rgba(0,0,0,0.4);">'
+            f'{content}'
+            f'</svg></div>'
+        )
+
+    def save_animated_svg(
+        self,
+        scene: Scene,
+        path: str,
+        *,
+        duration: Optional[float] = None,
+        fps: float = 10.0,
+        max_strobe_freq: float = 7.5,
+    ) -> None:
+        """Export the stage animation to a standalone .svg file."""
+        html_view = self.render_animated_svg(scene, duration=duration, fps=fps, max_strobe_freq=max_strobe_freq)
+        s = str(html_view)
+        svg_pure = s[s.find('<svg'):s.rfind('</svg>') + 6]
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(svg_pure)
+
+    def save_animated_gif(
+        self,
+        scene: Scene,
+        path: str,
+        *,
+        duration: Optional[float] = None,
+        fps: float = 10.0,
+        max_strobe_freq: float = 7.5,
+    ) -> None:
+        """Export the stage animation to an animated .gif file using inkscape and ffmpeg.
+
+        Requires 'inkscape' and 'ffmpeg' on the system.
+        """
+        import os
+        import shutil
+        import subprocess
+        import tempfile
+
+        if not shutil.which("inkscape"):
+            raise RuntimeError("save_animated_gif requires 'inkscape' installed on the system.")
+        if not shutil.which("ffmpeg"):
+            raise RuntimeError("save_animated_gif requires 'ffmpeg' installed on the system.")
+
+        is_inf = math.isinf(scene.duration)
+        show_dur = (6.0 if is_inf else scene.duration) if duration is None else duration
+        if show_dur <= 0:
+            show_dur = 1.0
+
+        frame_count = max(1, round(show_dur * fps))
+        step_dt = show_dur / frame_count
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            shell_cmds = []
+            for i in range(frame_count):
+                t = i * step_dt
+                svg_view = self.render_svg(scene, t=t, fps=fps, max_strobe_freq=max_strobe_freq)
+                svg_str = str(svg_view)
+                svg_pure = svg_str[svg_str.find("<svg"):svg_str.rfind("</svg>") + 6]
+                s_path = os.path.join(tmpdir, f"frame_{i:04d}.svg")
+                p_path = os.path.join(tmpdir, f"frame_{i:04d}.png")
+                with open(s_path, "w", encoding="utf-8") as f:
+                    f.write(svg_pure)
+                shell_cmds.append(f"file-open:{s_path}; export-filename:{p_path}; export-width:{self.width}; export-height:{self.height}; export-do;")
+            shell_cmds.append("quit")
+
+            proc = subprocess.Popen(
+                ["inkscape", "--shell"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+            proc.communicate("\n".join(shell_cmds) + "\n")
+
+            palette_path = os.path.join(tmpdir, "palette.png")
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-framerate", str(fps),
+                    "-i", os.path.join(tmpdir, "frame_%04d.png"),
+                    "-vf", "palettegen=stats_mode=diff",
+                    palette_path,
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-framerate", str(fps),
+                    "-i", os.path.join(tmpdir, "frame_%04d.png"),
+                    "-i", palette_path,
+                    "-lavfi", "paletteuse=dither=bayer:bayer_scale=3",
+                    path,
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
     def inspect(
         self,
         scene: Scene,

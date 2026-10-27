@@ -38,6 +38,27 @@ class TestDemoDisco16Par(unittest.TestCase):
             self.assertIn(f"T{i}", svg_str)
             self.assertIn(f"B{i}", svg_str)
 
+    def test_stage_render_animated_svg(self) -> None:
+        """Verify animated SMIL SVG generation for a 2-second snippet."""
+        import tempfile
+        import os
+        anim_svg = STAGE_16.render_animated_svg(DISCO_SHOW, duration=2.0, fps=5.0)
+        svg_str = str(anim_svg)
+        self.assertIn("<svg", svg_str)
+        self.assertIn("</svg>", svg_str)
+        self.assertIn("attributeName=\"display\"", svg_str)
+        self.assertIn("f_anim_0", svg_str)
+
+        with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as f:
+            temp_path = f.name
+        try:
+            STAGE_16.save_animated_svg(DISCO_SHOW, temp_path, duration=1.0, fps=4.0)
+            self.assertTrue(os.path.exists(temp_path))
+            self.assertGreater(os.path.getsize(temp_path), 1000)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
 
 if __name__ == "__main__":
     unittest.main()

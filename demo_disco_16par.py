@@ -248,5 +248,26 @@ def create_disco_show():
 
 DISCO_SHOW = create_disco_show()
 
+
+def export_svg(path: str = "disco_16par_show.svg", fps: float = 10.0) -> None:
+    """Export the complete 30-second disco animation as a standalone animated SVG."""
+    print(f"Exporting animated SVG to {path} ({fps} fps)...")
+    STAGE_16.save_animated_svg(DISCO_SHOW, path, fps=fps)
+    print(f"Saved {path} successfully!")
+
+
+def export_gif(path: str = "disco_16par_show.gif", fps: float = 10.0) -> None:
+    """Export the complete 30-second disco animation as an animated GIF."""
+    print(f"Exporting animated GIF to {path} ({fps} fps)...")
+    STAGE_16.save_animated_gif(DISCO_SHOW, path, fps=fps)
+    print(f"Saved {path} successfully!")
+
+
 if __name__ == "__main__":
+    import sys
     print(f"DISCO_SHOW compiled successfully! Total duration: {DISCO_SHOW.duration:.2f}s")
+    if "--svg" in sys.argv:
+        export_svg()
+    if "--gif" in sys.argv:
+        export_gif()
+
