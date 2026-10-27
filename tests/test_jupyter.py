@@ -84,6 +84,44 @@ class TestJupyterIntegration(unittest.TestCase):
         self.assertIsNotNone(HTMLFormatter()(scrubber))
         self.assertIsNone(JavascriptFormatter()(scrubber))
 
+    def test_sliced_fixture_groups_in_layer_scene_timeline(self) -> None:
+        """Verify multiple slices of the same parent group render all lanes with clean indices in Jupyter."""
+        from lightshow.jupyter import Color, Chase, render_scene_timeline_svg
+        from lightshow.profiles import EurolitePartySpot
+
+        PARS_16 = EurolitePartySpot.group('PARS', start_channels=[1 + i * 6 for i in range(16)])
+        chase = Chase(
+            color=Color.YELLOW,
+            step_duration=0.15,
+            tail=3.0,
+            background=Color.from_hex("#0d0033"),
+            wrap=False,
+        ).pingpong() * 2
+
+        # 2 rows of 8 PARs sliced from 16 PARs
+        row1 = PARS_16[0:8]
+        row2 = PARS_16[8:16]
+
+        self.assertEqual(row1.name, "PARS[0:8]")
+        self.assertEqual(row2.name, "PARS[8:16]")
+        self.assertEqual(row1.label(0), "PARS[0]")
+        self.assertEqual(row1.label(7), "PARS[7]")
+        self.assertEqual(row2.label(0), "PARS[8]")
+        self.assertEqual(row2.label(7), "PARS[15]")
+
+        scene = (row1(chase @ 2.0) | row2(chase @ 4.0))
+
+        # Both slices must be present in scene.groups()
+        groups = scene.groups()
+        self.assertEqual(len(groups), 2)
+        self.assertEqual([g.name for g in groups], ["PARS[0:8]", "PARS[8:16]"])
+
+        # Timeline SVG must render all 16 distinct lanes
+        svg = render_scene_timeline_svg(scene)
+        self.assertNotIn("[slice]", svg)
+        for i in range(16):
+            self.assertIn(f"PARS[{i}]", svg)
+
 
 if __name__ == "__main__":
     unittest.main()

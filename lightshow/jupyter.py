@@ -191,9 +191,17 @@ def render_scene_timeline_svg(
 
     # Flatten elements
     lanes: list[tuple[str, int, FixtureGroup, int]] = []
+    seen_elements: set[tuple[tuple[str, Optional[int]], ...]] = set()
+
     for grp in groups:
         for i in range(grp.count):
-            label = f"{grp.name}[{i}]" if grp.count > 1 else grp.name
+            el = grp.elements[i]
+            el_key = tuple(sorted((attr, getattr(prim, "address", None)) for attr, prim in el.items()))
+            if el_key in seen_elements:
+                continue
+            seen_elements.add(el_key)
+
+            label = grp.label(i) if hasattr(grp, "label") else (f"{grp.name}[{i}]" if grp.count > 1 else grp.name)
             lanes.append((label, i, grp, len(lanes)))
 
     track_height = 18
@@ -228,7 +236,7 @@ def render_scene_timeline_svg(
         y_top = header_height + lane_idx * (track_height + track_gap)
         svg_elements.append(
             f'<text x="14" y="{y_top + 13}" fill="#9ca3af" font-family="monospace" '
-            f'font-size="10">{html.escape(label[:14])}</text>'
+            f'font-size="10">{html.escape(label[:16])}</text>'
         )
         svg_elements.append(
             f'<rect x="{left_margin}" y="{y_top}" width="{plot_width}" height="{track_height}" '
@@ -236,10 +244,11 @@ def render_scene_timeline_svg(
         )
 
     # Sample canvas at each time step
+    max_channel = max([64] + [grp.max_channel for grp in groups])
     for step in range(steps):
         t = (step + 0.5) * step_dt
         canvas = scene.eval_canvas(t)
-        dmx_frame = canvas.to_dmx_list(min_size=64)
+        dmx_frame = canvas.to_dmx_list(min_size=max_channel)
         x = left_margin + step * slice_w
 
         for label, el_idx, grp, lane_idx in lanes:

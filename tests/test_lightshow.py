@@ -163,6 +163,18 @@ class TestLightshow(unittest.TestCase):
 
         # Test STAGE_RGB = PAR_RGB[:2] + STROBE_RGB + PAR_RGB[2:]
         # Index 0, 1 are PAR 1, 2; Index 2 is Strobe RGB 1; Index 7 is PAR 4
+        self.assertEqual(PAR_RGB[:2].name, "PAR_RGB[:2]")
+        self.assertEqual(PAR_RGB[2:].name, "PAR_RGB[2:]")
+        self.assertEqual(PAR_RGB[:2].labels, ("PAR_RGB[0]", "PAR_RGB[1]"))
+        self.assertEqual(PAR_RGB[2:].labels, ("PAR_RGB[2]", "PAR_RGB[3]"))
+        combo = PAR_RGB[:2] + STROBE_RGB + PAR_RGB[2:]
+        self.assertEqual(combo.labels[0], "PAR_RGB[0]")
+        self.assertEqual(combo.labels[2], "STROBE_RGB[0]")
+        self.assertEqual(combo.labels[7], "PAR_RGB[3]")
+        self.assertEqual(STAGE_RGB.labels[0], "STAGE_RGB[0]")
+        self.assertEqual(PAR_RGB[3].name, "PAR_RGB[3]")
+        self.assertEqual(PAR_RGB[3].label(0), "PAR_RGB[3]")
+
         dmx_stage = rig.render_dmx(
             {
                 STAGE_RGB: Hold(Color.GREEN, duration=1.0).on(2, 7),

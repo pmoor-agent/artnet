@@ -90,6 +90,15 @@ def _normalize_element(spec: Union[PrimitiveSpec, ElementPatch]) -> dict[str, Pr
     return dict(spec)
 
 
+def _format_slice(s: slice) -> str:
+    """Format a slice object like `[0:8]`, `[:4]`, or `[::2]`."""
+    start = "" if s.start is None else str(s.start)
+    stop = "" if s.stop is None else str(s.stop)
+    if s.step is not None:
+        return f"[{start}:{stop}:{s.step}]"
+    return f"[{start}:{stop}]"
+
+
 # =============================================================================
 # Sparse DMX Frame Representation for Composable Scenes
 # =============================================================================
@@ -180,6 +189,7 @@ class FixtureGroup:
         self,
         name: str,
         elements: Sequence[Union[PrimitiveSpec, ElementPatch]],
+        labels: Optional[Sequence[str]] = None,
     ) -> None:
         if not elements:
             raise ValueError("FixtureGroup requires at least one element.")
@@ -187,6 +197,29 @@ class FixtureGroup:
         self.elements: tuple[dict[str, PrimitiveSpec], ...] = tuple(
             _normalize_element(e) for e in elements
         )
+        if labels is not None:
+            if len(labels) != len(self.elements):
+                raise ValueError(
+                    f"Length of labels ({len(labels)}) must match elements ({len(self.elements)})"
+                )
+            self.labels: tuple[str, ...] = tuple(labels)
+        else:
+            if len(self.elements) == 1:
+                self.labels = (name,)
+            else:
+                self.labels = tuple(f"{name}[{i}]" for i in range(len(self.elements)))
+
+    def label(self, index: int) -> str:
+        """Return the display label for element at `index`."""
+        if 0 <= index < len(self.labels):
+            return self.labels[index]
+        return f"{self.name}[{index}]"
+
+    def __repr__(self) -> str:
+        return f"<FixtureGroup {self.name!r} ({self.count} fixtures)>"
+
+    def __str__(self) -> str:
+        return self.name
 
     def __call__(self, clip: Clip) -> BoundScene:
         """Bind `clip` to this `FixtureGroup`, returning an algebraically composable `Scene`!
@@ -221,7 +254,8 @@ class FixtureGroup:
         """Extract a subset of attributes (e.g. `.select('w')` or `.select('color')`) as a new FixtureGroup view."""
         if not attrs:
             raise ValueError("Must specify at least one attribute name to select.")
-        sub_label = name or f"{self.name}.{','.join(attrs)}"
+        attr_suffix = ",".join(attrs)
+        sub_label = name or f"{self.name}.{attr_suffix}"
         if len(attrs) == 1:
             attr = attrs[0]
             single_prim_list: list[Union[PrimitiveSpec, ElementPatch]] = []
@@ -233,13 +267,15 @@ class FixtureGroup:
                     single_prim_list.append({"color": prim})
                 else:
                     single_prim_list.append({attr: prim, "value": prim})
-            return FixtureGroup(name=sub_label, elements=single_prim_list)
+            new_labels = tuple(f"{l}.{attr}" for l in self.labels) if name is None else None
+            return FixtureGroup(name=sub_label, elements=single_prim_list, labels=new_labels)
 
         multi_list: list[ElementPatch] = []
         for el in self.elements:
             sub = {a: el[a] for a in attrs if a in el}
             multi_list.append(sub)
-        return FixtureGroup(name=sub_label, elements=multi_list)
+        new_labels = tuple(f"{l}.{attr_suffix}" for l in self.labels) if name is None else None
+        return FixtureGroup(name=sub_label, elements=multi_list, labels=new_labels)
 
     def named(self, name: str) -> FixtureGroup:
         """Return a copy of this FixtureGroup with a custom display name."""
@@ -252,15 +288,27 @@ class FixtureGroup:
         return FixtureGroup(
             name=f"{self.name}+{other.name}",
             elements=self.elements + other.elements,
+            labels=self.labels + other.labels,
         )
 
     def __getitem__(self, item: Union[int, slice]) -> FixtureGroup:
-        """Slice or index a FixtureGroup (e.g. `PAR_RGB[:2] + STROBE_RGB + PAR_RGB[2:]`)."""
+        """Slice or index a FixtureGroup (e.g. `PARS[0:8]`, `PARS[8:16]`, `PARS[3]`)."""
         if isinstance(item, int):
-            return FixtureGroup(name=f"{self.name}[{item}]", elements=[self.elements[item]])
+            idx = item if item >= 0 else len(self.elements) + item
+            lbl = self.labels[idx] if 0 <= idx < len(self.labels) else f"{self.name}[{item}]"
+            return FixtureGroup(
+                name=f"{self.name}[{item}]",
+                elements=[self.elements[item]],
+                labels=(lbl,),
+            )
         if isinstance(item, slice):
             sliced = self.elements[item]
-            return FixtureGroup(name=f"{self.name}[slice]", elements=sliced)
+            sliced_labels = self.labels[item]
+            return FixtureGroup(
+                name=f"{self.name}{_format_slice(item)}",
+                elements=sliced,
+                labels=sliced_labels,
+            )
         raise TypeError(f"Invalid index type: {type(item)}")
 
     def __len__(self) -> int:
@@ -609,9 +657,16 @@ class LayerScene(Scene):
         return c_bot.merge(c_top, mode=self.mode)
 
     def groups(self) -> list[FixtureGroup]:
-        seen: dict[str, FixtureGroup] = {}
+        seen: dict[tuple, FixtureGroup] = {}
         for g in self.bottom.groups() + self.top.groups():
-            seen.setdefault(g.name, g)
+            sig = (
+                g.name,
+                tuple(
+                    tuple(sorted((a, getattr(p, "address", None)) for a, p in el.items()))
+                    for el in g.elements
+                ),
+            )
+            seen.setdefault(sig, g)
         return list(seen.values())
 
     def flicker(self, depth: float = 0.5, speed: float = 12.0, **kwargs) -> Scene:
@@ -661,10 +716,17 @@ class SequenceScene(Scene):
         return self.scenes[-1].eval_canvas(self.scenes[-1].duration)
 
     def groups(self) -> list[FixtureGroup]:
-        seen: dict[str, FixtureGroup] = {}
+        seen: dict[tuple, FixtureGroup] = {}
         for s in self.scenes:
             for g in s.groups():
-                seen.setdefault(g.name, g)
+                sig = (
+                    g.name,
+                    tuple(
+                        tuple(sorted((a, getattr(p, "address", None)) for a, p in el.items()))
+                        for el in g.elements
+                    ),
+                )
+                seen.setdefault(sig, g)
         return list(seen.values())
 
     def flicker(self, depth: float = 0.5, speed: float = 12.0, **kwargs) -> Scene:
