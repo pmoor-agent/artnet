@@ -66,10 +66,13 @@ from .fixtures import (
 from .state import Color, ParPatch, Patch
 from .tempo import (
     MusicalDuration,
+    Seconds,
     Tempo,
     bars,
     beats,
     get_tempo,
+    sec,
+    seconds,
     set_bpm,
 )
 
@@ -119,6 +122,7 @@ __all__ = [
     "ScaleClip",
     "ScaleScene",
     "Scene",
+    "Seconds",
     "Seq",
     "Sequence",
     "SequenceClip",
@@ -141,6 +145,8 @@ __all__ = [
     "get_tempo",
     "inf",
     "kelvin_to_ww_cw",
+    "sec",
+    "seconds",
     "set_bpm",
     "smooth_noise1d",
 ]

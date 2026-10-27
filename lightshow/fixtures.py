@@ -509,8 +509,11 @@ class Scene:
     def __rmul__(self, count: Union[int, float]) -> RepeatScene:
         return self.__mul__(count)
 
-    def __matmul__(self, target_duration: float) -> TimeScaleScene:
-        """`scene @ duration`: Stretch or compress a finite scene to `target_duration` seconds."""
+    def __matmul__(self, target_duration: Union[float, Any]) -> Scene:
+        """`scene @ duration`: Stretch or compress a finite scene to `target_duration` seconds or musical beats."""
+        return self.with_duration(target_duration)
+
+    def with_duration(self, target_duration: Union[float, Any]) -> Scene:
         return TimeScaleScene(self, target_duration)
 
     def __invert__(self) -> ReverseScene:
@@ -659,6 +662,9 @@ class BoundScene(Scene):
                 dimmer_scale=dimmer_scale,
             ),
         )
+
+    def with_duration(self, target_duration: Union[float, Any]) -> BoundScene:
+        return BoundScene(self.group, self.clip.with_duration(target_duration))
 
 
 class LayerScene(Scene):
@@ -833,17 +839,20 @@ class TimeScaleScene(Scene):
     def eval_canvas(self, t: float) -> DMXCanvas:
         return self.child.eval_canvas(t * self.rate)
 
+    def with_duration(self, target_duration: Union[float, Any]) -> Scene:
+        return self.child.with_duration(target_duration)
+
     def groups(self) -> list[FixtureGroup]:
         return self.child.groups()
 
     def flicker(self, depth: float = 0.5, speed: float = 12.0, **kwargs) -> Scene:
-        return TimeScaleScene(self.child.flicker(depth=depth, speed=speed, **kwargs), target_duration=self.duration)
+        return TimeScaleScene(self.child.flicker(depth=depth, speed=speed, **kwargs), target_duration=self._target_duration)
 
     def jitter_hue(self, amount: float = 0.08, speed: float = 3.0, **kwargs) -> Scene:
-        return TimeScaleScene(self.child.jitter_hue(amount=amount, speed=speed, **kwargs), target_duration=self.duration)
+        return TimeScaleScene(self.child.jitter_hue(amount=amount, speed=speed, **kwargs), target_duration=self._target_duration)
 
     def shift_hsv(self, dh: Union[float, Clip] = 0.0, ds: float = 0.0, dv: float = 0.0, **kwargs) -> Scene:
-        return TimeScaleScene(self.child.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs), target_duration=self.duration)
+        return TimeScaleScene(self.child.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs), target_duration=self._target_duration)
 
 
 class ReverseScene(Scene):

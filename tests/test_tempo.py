@@ -16,11 +16,14 @@ from lightshow import (
     Pulse,
     RGB,
     Rig,
+    Seconds,
     Sequence,
     Tempo,
     bars,
     beats,
     get_tempo,
+    sec,
+    seconds,
     set_bpm,
 )
 from lightshow.jupyter import LiveStream
@@ -219,6 +222,152 @@ class TestClipTempoIntegration(unittest.TestCase):
         # At 1200 BPM (extreme), 1 beat = 0.05s, max(0.05, 0.1) = 0.1s (strobe stays 0.1s!)
         self.t.bpm = 1200.0
         self.assertAlmostEqual(mixed.duration, 0.1)
+
+    def test_clip_at_beats_and_scene_at_beats(self) -> None:
+        """Verify `clip @ beats(4)` and `scene @ beats(4)` scale dynamically with tempo."""
+        # 1. Clip @ beats(4)
+        fade = Fade(Color.RED, Color.BLUE, 1.0)
+        scaled_clip = fade @ self.t.beats(4.0)
+
+        # At 120 BPM: 4 beats = 2.0s
+        self.assertAlmostEqual(scaled_clip.duration, 2.0)
+        # Midpoint is at t=1.0s -> lerp 0.5
+        mid_patch = scaled_clip.eval(1.0)
+        self.assertAlmostEqual(mid_patch.color.r, 0.5)
+        self.assertAlmostEqual(mid_patch.color.b, 0.5)
+
+        # Change tempo to 240 BPM: duration dynamically becomes 1.0s!
+        self.t.bpm = 240.0
+        self.assertAlmostEqual(scaled_clip.duration, 1.0)
+        # Midpoint is now at t=0.5s -> lerp 0.5
+        mid_patch_fast = scaled_clip.eval(0.5)
+        self.assertAlmostEqual(mid_patch_fast.color.r, 0.5)
+        self.assertAlmostEqual(mid_patch_fast.color.b, 0.5)
+
+        # 2. Scene @ beats(4)
+        scene = self.pars(fade) @ self.t.beats(4.0)
+        self.assertAlmostEqual(scene.duration, 1.0)
+        self.t.bpm = 60.0
+        self.assertAlmostEqual(scene.duration, 4.0)
+
+    def test_chase_with_seconds_tail_tempo_invariance(self) -> None:
+        """Verify Chase(step_duration=beats(1), tail=seconds(1.0)) decay lasts exactly 1s at all tempos."""
+        # Step switches on the beat (beats(1)), but decay tail is fixed wall-clock seconds(1.0)
+        chase = Chase(Color.WHITE, step_duration=self.t.beats(1.0), tail=seconds(1.0), num_steps=4, wrap=False)
+
+        # At 120 BPM: step_dt = 0.5s.
+        # Fixture 0 arrives at t=0.0s.
+        # It decays linearly over 1.0s:
+        # t=0.0s -> 1.0 (arrival peak)
+        # t=0.5s -> 0.5 (halfway through 1.0s tail)
+        # t=1.0s -> 0.0 (tail fully finished after 1.0s)
+        self.assertAlmostEqual(chase.eval(0.00, fixture=0, total_fixtures=4).color.r, 1.0, places=3)
+        self.assertAlmostEqual(chase.eval(0.50, fixture=0, total_fixtures=4).color.r, 0.5, places=3)
+        self.assertAlmostEqual(chase.eval(1.00, fixture=0, total_fixtures=4).color.r, 0.0, places=3)
+        self.assertAlmostEqual(chase.eval(1.10, fixture=0, total_fixtures=4).color.r, 0.0, places=3)
+
+        # Speed up tempo to 240 BPM: step_dt = 0.25s.
+        # Fixture 0 arrives at t=0.0s.
+        # Tail must STILL last exactly 1.0s (spanning 4 steps now instead of 2 steps)!
+        self.t.bpm = 240.0
+        self.assertAlmostEqual(chase.eval(0.00, fixture=0, total_fixtures=4).color.r, 1.0, places=3)
+        self.assertAlmostEqual(chase.eval(0.50, fixture=0, total_fixtures=4).color.r, 0.5, places=3)
+        self.assertAlmostEqual(chase.eval(1.00, fixture=0, total_fixtures=4).color.r, 0.0, places=3)
+        self.assertAlmostEqual(chase.eval(1.05, fixture=0, total_fixtures=4).color.r, 0.0, places=3)
+
+    def test_chase_with_seconds_tail_scaling_invariance(self) -> None:
+        """Verify when scaling via `@ duration`, parameters in seconds(...) do NOT scale."""
+        chase = Chase(Color.WHITE, step_duration=self.t.beats(1.0), tail=seconds(1.0), num_steps=4, wrap=False)
+
+        # Scale whole chase to 8.0s: each step stretches from 0.5s to 2.0s!
+        stretched = chase @ 8.0
+        self.assertAlmostEqual(stretched.duration, 8.0)
+        self.assertAlmostEqual(stretched.step_duration, 2.0)
+
+        # But the tail decay was declared in seconds(1.0), so decay time is STILL exactly 1.0s!
+        # Fixture 0 arrives at t=0.0s:
+        # t=0.0s -> 1.0
+        # t=0.5s -> 0.5
+        # t=1.0s -> 0.0
+        self.assertAlmostEqual(stretched.eval(0.00, fixture=0, total_fixtures=4).color.r, 1.0, places=3)
+        self.assertAlmostEqual(stretched.eval(0.50, fixture=0, total_fixtures=4).color.r, 0.5, places=3)
+        self.assertAlmostEqual(stretched.eval(1.00, fixture=0, total_fixtures=4).color.r, 0.0, places=3)
+        self.assertAlmostEqual(stretched.eval(1.10, fixture=0, total_fixtures=4).color.r, 0.0, places=3)
+
+        # Contrast with dimensionless float tail: tail=2.0 (decay span = 1 + 2 = 3 steps)
+        chase_float = Chase(Color.WHITE, step_duration=0.5, tail=2.0, num_steps=4, wrap=False)
+        stretched_float = chase_float @ 8.0
+        # Stretched step is 2.0s, so 3 steps of decay = 6.0s of physical decay!
+        # At t=2.0s (1 step into decay), intensity is 1 - 1/3 = 0.667
+        self.assertAlmostEqual(stretched_float.eval(2.0, fixture=0, total_fixtures=4).color.r, 2.0 / 3.0, places=3)
+        # At t=6.0s (3 steps into decay), intensity reaches 0.0
+        self.assertAlmostEqual(stretched_float.eval(6.0, fixture=0, total_fixtures=4).color.r, 0.0, places=3)
+
+    def test_pulse_with_seconds_attack_scaling_invariance(self) -> None:
+        """Verify Pulse with attack=seconds(...) keeps unscaled attack when stretched via `@`."""
+        p = Pulse(Color.RED, duration=1.0, attack=seconds(0.05))
+        self.assertAlmostEqual(p.lead, 0.05)
+        self.assertAlmostEqual(p.tail, 0.95)
+
+        # Stretch pulse from 1.0s to 5.0s
+        stretched = p @ 5.0
+        self.assertAlmostEqual(stretched.duration, 5.0)
+
+        # Attack remains 50ms (0.05s)!
+        self.assertAlmostEqual(stretched.lead, 0.05)
+        # Decay absorbed the stretch (5.0 - 0.05 = 4.95s)
+        self.assertAlmostEqual(stretched.tail, 4.95)
+
+        # Reaches peak 1.0 at t=0.05s
+        self.assertAlmostEqual(stretched.eval(0.05).color.r, 1.0, places=3)
+        # At t=2.525s (halfway through decay), level is 0.5
+        self.assertAlmostEqual(stretched.eval(0.05 + 4.95 / 2.0).color.r, 0.5, places=3)
+
+    def test_pingpong_with_seconds_tail_invariance(self) -> None:
+        """Verify PingPongChase with tail=seconds(...) preserves decay across bounce turnarounds."""
+        pp = Chase(Color.WHITE, step_duration=self.t.beats(1.0), tail=seconds(1.0), num_steps=4).pingpong()
+        # 4 fixtures -> bounce cycle is 2 * (4 - 1) = 6 steps
+        # At 120 BPM: step_dt = 0.5s -> duration = 3.0s
+        self.assertAlmostEqual(pp.duration, 3.0)
+
+        # Fixture 0 is hit at t=0.0s. It decays over 1.0s.
+        self.assertAlmostEqual(pp.eval(0.0, fixture=0, total_fixtures=4).color.r, 1.0, places=3)
+        self.assertAlmostEqual(pp.eval(0.5, fixture=0, total_fixtures=4).color.r, 0.5, places=3)
+        self.assertAlmostEqual(pp.eval(1.0, fixture=0, total_fixtures=4).color.r, 0.0, places=3)
+
+        # Change tempo to 240 BPM: step_dt = 0.25s -> duration = 1.5s
+        self.t.bpm = 240.0
+        self.assertAlmostEqual(pp.duration, 1.5)
+        # Fixture 0 still decays in exactly 1.0s:
+        self.assertAlmostEqual(pp.eval(0.0, fixture=0, total_fixtures=4).color.r, 1.0, places=3)
+        self.assertAlmostEqual(pp.eval(0.5, fixture=0, total_fixtures=4).color.r, 0.5, places=3)
+        self.assertAlmostEqual(pp.eval(1.0, fixture=0, total_fixtures=4).color.r, 0.0, places=3)
+
+    def test_seconds_object_arithmetic_and_comparisons(self) -> None:
+        """Verify Seconds object behaves cleanly with floats and formatting."""
+        s = seconds(1.5)
+        self.assertEqual(float(s), 1.5)
+        self.assertEqual(int(s), 1)
+        self.assertEqual(repr(s), "Seconds(1.5s)")
+        self.assertEqual(f"{s:.1f}", "1.5")
+        self.assertEqual(sec(2.0), Seconds(2.0))
+
+        # Arithmetic
+        self.assertEqual(s + 0.5, Seconds(2.0))
+        self.assertEqual(0.5 + s, Seconds(2.0))
+        self.assertEqual(s - 0.5, Seconds(1.0))
+        self.assertEqual(2.0 - s, Seconds(0.5))
+        self.assertEqual(s * 2, Seconds(3.0))
+        self.assertEqual(2 * s, Seconds(3.0))
+        self.assertEqual(s / 0.5, 3.0)
+        self.assertEqual(3.0 / s, 2.0)
+        self.assertEqual(s % 1.0, 0.5)
+
+        # Comparisons
+        self.assertTrue(s > 1.0)
+        self.assertTrue(s < 2.0)
+        self.assertEqual(s, 1.5)
+        self.assertEqual(s, Seconds(1.5))
 
 
 class TestLiveStreamTempoSync(unittest.TestCase):

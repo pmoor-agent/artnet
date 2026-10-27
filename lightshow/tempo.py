@@ -105,9 +105,17 @@ class MusicalDuration:
             return self._beats / divisor._beats
         return MusicalDuration(self._beats / float(divisor), tempo=self._tempo)
 
+    def __rtruediv__(self, dividend: Any) -> float:
+        sec = self.seconds
+        return float(dividend) / sec if sec > 0 else 0.0
+
     def __mod__(self, divisor: Union[MusicalDuration, float, int]) -> float:
         div_sec = float(divisor)
         return self.seconds % div_sec if div_sec > 0 else 0.0
+
+    def __rmod__(self, dividend: Any) -> float:
+        sec = self.seconds
+        return float(dividend) % sec if sec > 0 else 0.0
 
     def __neg__(self) -> MusicalDuration:
         return MusicalDuration(-self._beats, tempo=self._tempo)
@@ -328,3 +336,101 @@ def bars(count: float = 1.0, tempo: Optional[Tempo] = None) -> MusicalDuration:
     """Create a `MusicalDuration` of `count` bars using `tempo` (or default active tempo)."""
     t = tempo or _DEFAULT_TEMPO
     return t.bars(count)
+
+
+# =============================================================================
+# Explicit Unscaled Wall-Clock Seconds
+# =============================================================================
+
+class Seconds:
+    """An explicit duration in wall-clock seconds.
+
+    When passed to clips (like `Chase(..., tail=seconds(1.0))` or
+    `Pulse(..., attack=seconds(0.1))`), it explicitly declares that this
+    parameter represents absolute seconds that should NOT scale when the clip
+    is stretched or compressed via `@ target_duration`.
+    """
+
+    __slots__ = ("_seconds",)
+
+    def __init__(self, s: Union[float, int, Seconds]) -> None:
+        if isinstance(s, Seconds):
+            self._seconds = s._seconds
+        else:
+            self._seconds = max(0.0, float(s))
+
+    @property
+    def seconds(self) -> float:
+        return self._seconds
+
+    def __float__(self) -> float:
+        return self._seconds
+
+    def __int__(self) -> int:
+        return int(self._seconds)
+
+    def __repr__(self) -> str:
+        return f"Seconds({self._seconds:g}s)"
+
+    def __format__(self, format_spec: str) -> str:
+        return format(self._seconds, format_spec)
+
+    def __add__(self, other: Any) -> Seconds:
+        return Seconds(self._seconds + float(other))
+
+    def __radd__(self, other: Any) -> Seconds:
+        return Seconds(float(other) + self._seconds)
+
+    def __sub__(self, other: Any) -> Seconds:
+        return Seconds(max(0.0, self._seconds - float(other)))
+
+    def __rsub__(self, other: Any) -> Seconds:
+        return Seconds(max(0.0, float(other) - self._seconds))
+
+    def __mul__(self, factor: Union[float, int]) -> Seconds:
+        return Seconds(self._seconds * float(factor))
+
+    def __rmul__(self, factor: Union[float, int]) -> Seconds:
+        return self.__mul__(factor)
+
+    def __truediv__(self, divisor: Any) -> float:
+        return self._seconds / float(divisor)
+
+    def __rtruediv__(self, dividend: Any) -> float:
+        return float(dividend) / self._seconds if self._seconds > 0 else 0.0
+
+    def __mod__(self, divisor: Any) -> float:
+        div = float(divisor)
+        return self._seconds % div if div > 0 else 0.0
+
+    def __rmod__(self, dividend: Any) -> float:
+        return float(dividend) % self._seconds if self._seconds > 0 else 0.0
+
+    def __lt__(self, other: Any) -> bool:
+        return self._seconds < float(other)
+
+    def __le__(self, other: Any) -> bool:
+        return self._seconds <= float(other)
+
+    def __gt__(self, other: Any) -> bool:
+        return self._seconds > float(other)
+
+    def __ge__(self, other: Any) -> bool:
+        return self._seconds >= float(other)
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, Seconds):
+            return self._seconds == other._seconds
+        return math.isclose(self._seconds, float(other), rel_tol=1e-9, abs_tol=1e-9)
+
+    def __hash__(self) -> int:
+        return hash(self._seconds)
+
+
+def seconds(s: float = 1.0) -> Seconds:
+    """Declare an explicit duration of `s` seconds (unscaled during time stretching)."""
+    return Seconds(s)
+
+
+sec = seconds
+

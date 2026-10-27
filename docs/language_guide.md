@@ -200,6 +200,38 @@ scene = PARS([
 ]) * bars(2)
 ```
 
+#### Time Scaling to Musical Beats (`clip @ beats(n)`)
+Any finite clip or scene can be stretched or compressed to fit an exact musical duration using the `@` operator:
+
+```python
+# Scale a 1-second crossfade to fit exactly 4 musical beats:
+groove_fade = Fade(Color.RED, Color.BLUE, 1.0) @ beats(4)
+
+# Scale a full scene to fit 2 bars:
+intro = PARS(Rainbow(period=4.0)) @ bars(2)
+```
+When tempo changes at runtime (`t.bpm = 140`), clips scaled with `@ beats(...)` or `@ bars(...)` adjust their playback rate dynamically!
+
+#### Absolute Wall-Clock Durations (`seconds(...)` / `sec(...)`)
+When scaling animations or adapting to tempo, you often want **rhythmic steps to follow the music**, but **physical decay tails or attack transients to remain invariant** (e.g. phosphor decay, laser snaps, camera shutter sync, or a fixed 1-second fade).
+
+Wrap any parameter in `seconds(...)` (or `sec(...)`) to lock it to wall-clock time:
+
+```python
+from lightshow import Chase, Pulse, Color, beats, seconds
+
+# Fixtures step on each musical beat, but the decay tail takes exactly 1.0 wall-clock second:
+chase = Chase(
+    Color.WHITE,
+    step_duration=beats(1),     # Steps rhythmically to the tempo
+    tail=seconds(1.0),          # Physical decay takes exactly 1.0s, regardless of BPM!
+)
+
+# When stretching a pulse via `@ 4.0`, attack stays 50ms while decay stretches:
+snappy_pulse = Pulse(Color.RED, duration=1.0, attack=seconds(0.05)) @ 4.0
+# -> attack stays 0.05s, decay expands to 3.95s!
+```
+
 ---
 
 ## 4. Spatial Composition & Layering
@@ -295,9 +327,10 @@ scene = PARS(chase @ 2.4)
 
 > [!NOTE]
 > **Spatial Envelope Parameters (`lead`, `hold`, `tail`)**:
-> - `lead`: Number of steps/fixtures ahead over which brightness ramps smoothly from 0.0 to 1.0 (attack / ramp-in). Defaults to `0.0`.
-> - `hold`: Number of steps (e.g. `hold=1.0` = 1 full step duration) the fixture stays clamped at 100% full brightness before fading. Defaults to `0.0`.
-> - `tail`: Number of steps/fixtures behind over which brightness decays smoothly from 1.0 down to 0.0 (decay / ramp-out).
+> - `lead`: Steps/time ahead over which brightness ramps smoothly from 0.0 to 1.0 (attack / ramp-in). Defaults to `0.0`.
+> - `hold`: Steps/time the fixture stays clamped at 100% full brightness before fading. Defaults to `0.0`.
+> - `tail`: Steps/time behind over which brightness decays smoothly from 1.0 down to 0.0 (decay / ramp-out).
+> - **Units**: Can be specified as dimensionless fixture steps (e.g. `tail=2.0`, scaling with step duration), physical wall-clock seconds (e.g. `tail=seconds(1.0)`, keeping decay time invariant regardless of tempo or `@ duration` scaling), or musical subdivisions (e.g. `tail=beats(2)`).
 >
 > **Envelope Shapes**:
 > - `lead=1.0, hold=0.0, tail=1.0`: Perfectly symmetric triangular/bell wave traveling across the fixtures.
@@ -504,7 +537,7 @@ stop_stream()
 | `A & B` | Multiply / Mask | Scale `A` brightness or channels by scalar envelope `B`. |
 | `A * n` | Repeat | Loop `A` for $n$ cycles (use `n = inf` for infinite loop). |
 | `A[start:stop]` | Time Slice (Cut) | Extract sub-range $[t_{\text{start}}, t_{\text{stop}}]$ from clip or scene. |
-| `A @ dur` | Time Scale | Rescale playback so total duration equals `dur` seconds. |
+| `A @ dur` | Time Scale | Rescale playback so total duration equals `dur` seconds (or `beats(n)` / `bars(n)`). |
 | `A / factor` | Speed Scale | Multiply playback speed by `factor` (`A / 2.0` = 2x speed). |
 | `~A` | Reverse | Play `A` backwards in time. |
 | `group(clip)` | Bind | Bind a `Clip` to a `FixtureGroup`, producing a `BoundScene`. |
@@ -521,6 +554,7 @@ stop_stream()
 | `t.sixteenth` / `t.eighth` | Subdivisions | 16th note ($0.25$ beat), 8th note ($0.5$ beat), etc. |
 | `t.triplet(subdivision)` | Triplet | Musical triplet (e.g. `t.triplet(8)` is an 8th-note triplet). |
 | `t.dotted(subdivision)` | Dotted Note | Dotted note ($1.5\times$ nominal note length). |
+| `seconds(s)` / `sec(s)` | Explicit Seconds | Wall-clock seconds that remain unscaled during `@ duration` stretching or tempo shifts. |
 | `t.tap()` | Tap Tempo | Average tap intervals and update BPM dynamically. |
 | `t.bpm = 135` | Live BPM Modulation | Dynamically speeds up/slows down all bound clips with zero phase glitch. |
 

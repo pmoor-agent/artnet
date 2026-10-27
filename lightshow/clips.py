@@ -20,6 +20,7 @@ from math import inf
 from typing import Callable, Iterable, Optional, Sequence as SeqType, Union
 
 from .state import Color, Patch
+from .tempo import MusicalDuration, Seconds
 
 
 class Ease:
@@ -108,8 +109,12 @@ class Clip:
     def __rmul__(self, count: Union[int, float]) -> Clip:
         return self.__mul__(count)
 
-    def __matmul__(self, target_duration: float) -> TimeScaleClip:
-        """`clip @ duration`: Stretch or compress a finite clip to `target_duration` seconds."""
+    def __matmul__(self, target_duration: Union[float, Any]) -> Clip:
+        """`clip @ duration`: Stretch or compress a finite clip to `target_duration` seconds or musical beats."""
+        return self.with_duration(target_duration)
+
+    def with_duration(self, target_duration: Union[float, Any]) -> Clip:
+        """Return a version of this clip scaled to `target_duration`."""
         return TimeScaleClip(self, target_duration)
 
     def __invert__(self) -> ReverseClip:
@@ -432,6 +437,15 @@ class TimeScaleClip(Clip):
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         return self.child.eval(t * self.rate, fixture, total_fixtures)
+
+    def with_duration(self, target_duration: Union[float, Any]) -> Clip:
+        return self.child.with_duration(target_duration)
+
+    def with_fixture_count(self, count: int) -> TimeScaleClip:
+        new_child = self.child.with_fixture_count(count)
+        if new_child is self.child:
+            return self
+        return TimeScaleClip(new_child, self._target_duration)
 
 
 class ReverseClip(Clip):
@@ -820,6 +834,9 @@ class Wait(Clip):
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         return Patch()
 
+    def with_duration(self, target_duration: Union[float, Any]) -> Wait:
+        return Wait(target_duration)
+
 
 # Alias Pause to Wait for semantic clarity
 Pause = Wait
@@ -850,6 +867,9 @@ class Hold(Clip):
         if t <= float(self.duration):
             return Patch(color=self.color, channels=dict(self.channels))
         return Patch()
+
+    def with_duration(self, target_duration: Union[float, Any]) -> Hold:
+        return Hold(self.color, duration=target_duration, **self.channels)
 
 
 def Blackout(duration: Union[float, Any] = inf) -> Hold:
@@ -887,6 +907,15 @@ class Fade(Clip):
             return Patch.from_channel(self.channel, val)
         return Patch()
 
+    def with_duration(self, target_duration: Union[float, Any]) -> Fade:
+        return Fade(
+            start=self.start,
+            end=self.end,
+            duration=target_duration,
+            channel=self.channel,
+            ease=self.ease_fn,
+        )
+
 
 class Pulse(Clip):
     """Fade from `low` to `high` and back to `low` over `duration` seconds (with customizable envelope)."""
@@ -916,6 +945,8 @@ class Pulse(Clip):
         eff_lead = attack if lead is None else lead
         eff_tail = decay if tail is None else tail
         self.hold = hold
+        self._explicit_lead = eff_lead is not None
+        self._explicit_tail = eff_tail is not None
 
         if duration is None:
             if eff_lead is None and eff_tail is None:
@@ -972,9 +1003,28 @@ class Pulse(Clip):
             return Patch(color=self.color_or_peak * level)
         return Patch.from_channel(self.channel, float(self.color_or_peak) * level)
 
-        if isinstance(self.color_or_peak, Color):
-            return Patch(color=self.color_or_peak * level)
-        return Patch.from_channel(self.channel, float(self.color_or_peak) * level)
+    def with_duration(self, target_duration: Union[float, Any]) -> Clip:
+        has_unscaled = (
+            isinstance(self.lead, Seconds)
+            or isinstance(self.tail, Seconds)
+            or isinstance(self.hold, Seconds)
+        )
+        if not has_unscaled:
+            return TimeScaleClip(self, target_duration)
+
+        lead_arg = self.lead if self._explicit_lead else None
+        tail_arg = self.tail if self._explicit_tail else None
+        return Pulse(
+            color_or_peak=self.color_or_peak,
+            duration=target_duration,
+            low=self.low,
+            high=self.high,
+            lead=lead_arg,
+            hold=self.hold,
+            tail=tail_arg,
+            channel=self.channel,
+            ease=self.ease_fn,
+        )
 
 
 class Strobe(Clip):
@@ -1043,8 +1093,17 @@ class Rainbow(Clip):
         self.value = value
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
-        hue = (t / self.period) % 1.0
+        p = float(self.period)
+        hue = (t / p) % 1.0 if p > 0 else 0.0
         return Patch(color=Color.from_hsv(hue, self.saturation, self.value))
+
+    def with_duration(self, target_duration: Union[float, Any]) -> Rainbow:
+        return Rainbow(
+            period=target_duration,
+            duration=target_duration,
+            saturation=self.saturation,
+            value=self.value,
+        )
 
 
 class Chase(Clip):
@@ -1056,9 +1115,9 @@ class Chase(Clip):
         step_duration: Union[float, Any] = 0.25,
         *,
         background: Optional[Union[Color, float]] = Color.BLACK,
-        lead: float = 0.0,
-        hold: float = 0.0,
-        tail: float = 0.0,
+        lead: Union[float, Any] = 0.0,
+        hold: Union[float, Any] = 0.0,
+        tail: Union[float, Any] = 0.0,
         num_steps: Optional[int] = None,
         wrap: bool = True,
         _explicit_num_steps: Optional[bool] = None,
@@ -1069,20 +1128,40 @@ class Chase(Clip):
         else:
             self.background = background
         self.step_duration = step_duration if hasattr(step_duration, "seconds") else float(step_duration)
-        self.lead = max(0.0, float(lead))
-        self.hold = max(0.0, float(hold))
-        self.tail = max(0.0, float(tail))
+        self.lead = lead if hasattr(lead, "seconds") else max(0.0, float(lead))
+        self.hold = hold if hasattr(hold, "seconds") else max(0.0, float(hold))
+        self.tail = tail if hasattr(tail, "seconds") else max(0.0, float(tail))
         self._explicit_num_steps = (num_steps is not None) if _explicit_num_steps is None else _explicit_num_steps
         self.num_steps = 4 if num_steps is None else max(1, int(num_steps))
         self.wrap = wrap
         self.duration = self.step_duration * self.num_steps
 
+    def with_duration(self, target_duration: Union[float, Any]) -> Chase:
+        new_step = target_duration / self.num_steps
+        c = Chase(
+            self.color,
+            new_step,
+            background=self.background,
+            lead=self.lead,
+            hold=self.hold,
+            tail=self.tail,
+            num_steps=self.num_steps,
+            wrap=self.wrap,
+            _explicit_num_steps=self._explicit_num_steps,
+        )
+        c._target_duration = target_duration
+        return c
+
     def with_fixture_count(self, count: int) -> Chase:
         if self._explicit_num_steps:
             return self
-        return Chase(
+        if hasattr(self, "_target_duration") and self._target_duration is not None:
+            new_step = self._target_duration / count
+        else:
+            new_step = self.step_duration
+        c = Chase(
             self.color,
-            self.step_duration,
+            new_step,
             background=self.background,
             lead=self.lead,
             hold=self.hold,
@@ -1091,21 +1170,35 @@ class Chase(Clip):
             wrap=self.wrap,
             _explicit_num_steps=False,
         )
+        if hasattr(self, "_target_duration"):
+            c._target_duration = self._target_duration
+        return c
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         n = max(1, total_fixtures)
-        if self.duration <= 0:
+        dur = float(self.duration)
+        if dur <= 0:
             pos = 0.0
         elif self.wrap:
-            pos = ((t / self.duration) * n) % n
+            pos = ((t / dur) * n) % n
         else:
-            pos = (t / self.duration) * n
+            pos = (t / dur) * n
 
-        if self.lead <= 0.0 and self.hold <= 0.0 and self.tail <= 0.0:
+        step_dt = float(self.step_duration)
+        if step_dt > 0:
+            eff_hold = (float(self.hold.seconds) / step_dt) if hasattr(self.hold, "seconds") else float(self.hold)
+            eff_lead = (float(self.lead.seconds) / step_dt) if hasattr(self.lead, "seconds") else float(self.lead)
+            eff_tail = (float(self.tail.seconds) / step_dt) if hasattr(self.tail, "seconds") else float(self.tail)
+        else:
+            eff_hold, eff_lead, eff_tail = float(self.hold), float(self.lead), float(self.tail)
+
+        if eff_lead <= 0.0 and eff_hold <= 0.0 and eff_tail <= 0.0:
             active = (int(pos) == (fixture % n)) if self.wrap else (int(pos) == fixture)
             if active:
                 return Patch(color=self.color)
             return Patch(color=self.background) if self.background is not None else Patch()
+
+        decay_span = eff_tail if (hasattr(self.tail, "seconds") or eff_hold > 0.0 or eff_lead > 0.0) else (1.0 + eff_tail)
 
         if self.wrap:
             dist = (pos - fixture) % n
@@ -1113,22 +1206,21 @@ class Chase(Clip):
                 dist = 0.0
 
             # 1. Hold and tail (time since arrival)
-            if dist <= self.hold:
+            if dist <= eff_hold:
                 i_tail = 1.0
             else:
-                decay_span = self.tail if (self.hold > 0.0 or self.lead > 0.0) else (1.0 + self.tail)
-                if decay_span > 0.0 and (dist - self.hold) <= decay_span:
-                    i_tail = max(0.0, 1.0 - (dist - self.hold) / decay_span)
+                if decay_span > 0.0 and (dist - eff_hold) <= decay_span:
+                    i_tail = max(0.0, 1.0 - (dist - eff_hold) / decay_span)
                 else:
                     i_tail = 0.0
 
             # 2. Lead ramp-in (time until arrival)
-            if self.lead > 0.0:
+            if eff_lead > 0.0:
                 d_ahead = (fixture - pos) % n
                 if d_ahead > n - 1e-9:
                     d_ahead = 0.0
-                if d_ahead <= self.lead:
-                    i_lead = max(0.0, 1.0 - d_ahead / self.lead)
+                if d_ahead <= eff_lead:
+                    i_lead = max(0.0, 1.0 - d_ahead / eff_lead)
                 else:
                     i_lead = 0.0
             else:
@@ -1138,24 +1230,23 @@ class Chase(Clip):
         else:
             dist = pos - fixture
             if dist < -1e-9:
-                if self.lead > 0.0:
+                if eff_lead > 0.0:
                     d_ahead = -dist
-                    if d_ahead <= self.lead:
-                        intensity = max(0.0, 1.0 - d_ahead / self.lead)
+                    if d_ahead <= eff_lead:
+                        intensity = max(0.0, 1.0 - d_ahead / eff_lead)
                     else:
                         intensity = 0.0
                 else:
                     intensity = 0.0
             else:
                 d = max(0.0, dist)
-                if d <= self.hold:
+                if d <= eff_hold:
                     intensity = 1.0
                 else:
-                    decay_span = self.tail if (self.hold > 0.0 or self.lead > 0.0) else (1.0 + self.tail)
-                    if decay_span <= 0.0 or (d - self.hold) > decay_span:
-                        intensity = 0.0
+                    if decay_span > 0.0 and (d - eff_hold) <= decay_span:
+                        intensity = max(0.0, 1.0 - (d - eff_hold) / decay_span)
                     else:
-                        intensity = max(0.0, 1.0 - (d - self.hold) / decay_span)
+                        intensity = 0.0
 
         if self.background is not None:
             return Patch(color=self.background.lerp(self.color, intensity))
@@ -1167,8 +1258,8 @@ class Chase(Clip):
         self,
         num_steps: Optional[int] = None,
         wrap: bool = True,
-        lead: Optional[float] = None,
-        hold: Optional[float] = None,
+        lead: Optional[Union[float, Any]] = None,
+        hold: Optional[Union[float, Any]] = None,
     ) -> PingPongChase:
         """Step back and forth through fixtures without repeating turnaround endpoints."""
         explicit = (num_steps is not None) or self._explicit_num_steps
@@ -1201,9 +1292,9 @@ class PingPongChase(Clip):
         step_duration: Union[float, Any] = 0.25,
         *,
         background: Optional[Union[Color, float]] = Color.BLACK,
-        lead: float = 0.0,
-        hold: float = 0.0,
-        tail: float = 0.0,
+        lead: Union[float, Any] = 0.0,
+        hold: Union[float, Any] = 0.0,
+        tail: Union[float, Any] = 0.0,
         num_steps: Optional[int] = None,
         wrap: bool = True,
         _explicit_num_steps: Optional[bool] = None,
@@ -1214,21 +1305,42 @@ class PingPongChase(Clip):
         else:
             self.background = background
         self.step_duration = step_duration if hasattr(step_duration, "seconds") else float(step_duration)
-        self.lead = max(0.0, float(lead))
-        self.hold = max(0.0, float(hold))
-        self.tail = max(0.0, float(tail))
+        self.lead = lead if hasattr(lead, "seconds") else max(0.0, float(lead))
+        self.hold = hold if hasattr(hold, "seconds") else max(0.0, float(hold))
+        self.tail = tail if hasattr(tail, "seconds") else max(0.0, float(tail))
         self._explicit_num_steps = (num_steps is not None) if _explicit_num_steps is None else _explicit_num_steps
         self.num_steps = 4 if num_steps is None else max(1, int(num_steps))
         self.bounce_steps = 2 * (self.num_steps - 1) if self.num_steps > 1 else 1
         self.duration = self.step_duration * self.bounce_steps
         self.wrap = wrap
 
+    def with_duration(self, target_duration: Union[float, Any]) -> PingPongChase:
+        new_step = target_duration / self.bounce_steps
+        c = PingPongChase(
+            self.color,
+            new_step,
+            background=self.background,
+            lead=self.lead,
+            hold=self.hold,
+            tail=self.tail,
+            num_steps=self.num_steps,
+            wrap=self.wrap,
+            _explicit_num_steps=self._explicit_num_steps,
+        )
+        c._target_duration = target_duration
+        return c
+
     def with_fixture_count(self, count: int) -> PingPongChase:
         if self._explicit_num_steps:
             return self
-        return PingPongChase(
+        bounce_steps = 2 * (count - 1) if count > 1 else 1
+        if hasattr(self, "_target_duration") and self._target_duration is not None:
+            new_step = self._target_duration / bounce_steps
+        else:
+            new_step = self.step_duration
+        c = PingPongChase(
             self.color,
-            self.step_duration,
+            new_step,
             background=self.background,
             lead=self.lead,
             hold=self.hold,
@@ -1237,6 +1349,9 @@ class PingPongChase(Clip):
             wrap=self.wrap,
             _explicit_num_steps=False,
         )
+        if hasattr(self, "_target_duration"):
+            c._target_duration = self._target_duration
+        return c
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         n = max(1, total_fixtures)
@@ -1244,8 +1359,9 @@ class PingPongChase(Clip):
             return Patch(color=self.color)
         m = n - 1
         cycle_steps = 2 * m
-        step_dt = (self.duration / cycle_steps) if self.duration > 0 else self.step_duration
-        period = self.duration if self.duration > 0 else (cycle_steps * step_dt)
+        dur = float(self.duration)
+        step_dt = (dur / cycle_steps) if dur > 0 else float(self.step_duration)
+        period = dur if dur > 0 else (cycle_steps * step_dt)
         if period <= 0:
             return Patch(color=self.color)
 
@@ -1257,7 +1373,14 @@ class PingPongChase(Clip):
         if 0 < fixture < m:
             trigs.append((cycle_steps - fixture) * step_dt)
 
-        if self.lead <= 0.0 and self.hold <= 0.0 and self.tail <= 0.0:
+        if step_dt > 0:
+            eff_hold = (float(self.hold.seconds) / step_dt) if hasattr(self.hold, "seconds") else float(self.hold)
+            eff_lead = (float(self.lead.seconds) / step_dt) if hasattr(self.lead, "seconds") else float(self.lead)
+            eff_tail = (float(self.tail.seconds) / step_dt) if hasattr(self.tail, "seconds") else float(self.tail)
+        else:
+            eff_hold, eff_lead, eff_tail = float(self.hold), float(self.lead), float(self.tail)
+
+        if eff_lead <= 0.0 and eff_hold <= 0.0 and eff_tail <= 0.0:
             for tr in trigs:
                 if self.wrap:
                     dt = (local_t - tr) % period
@@ -1272,7 +1395,7 @@ class PingPongChase(Clip):
             return Patch(color=self.background) if self.background is not None else Patch()
 
         intensity = 0.0
-        decay_span = self.tail if (self.hold > 0.0 or self.lead > 0.0) else (1.0 + self.tail)
+        decay_span = eff_tail if (hasattr(self.tail, "seconds") or eff_hold > 0.0 or eff_lead > 0.0) else (1.0 + eff_tail)
         for tr in trigs:
             if self.wrap:
                 # 1. Tail and Hold (time elapsed since hit)
@@ -1280,19 +1403,19 @@ class PingPongChase(Clip):
                 if dt_since > period - 1e-9:
                     dt_since = 0.0
                 d_steps = dt_since / step_dt
-                if d_steps <= self.hold:
+                if d_steps <= eff_hold:
                     intensity = max(intensity, 1.0)
-                elif decay_span > 0.0 and (d_steps - self.hold) <= decay_span:
-                    intensity = max(intensity, 1.0 - (d_steps - self.hold) / decay_span)
+                elif decay_span > 0.0 and (d_steps - eff_hold) <= decay_span:
+                    intensity = max(intensity, 1.0 - (d_steps - eff_hold) / decay_span)
 
                 # 2. Lead ramp-in (time until hit)
-                if self.lead > 0.0:
+                if eff_lead > 0.0:
                     dt_until = (tr - local_t) % period
                     if dt_until > period - 1e-9:
                         dt_until = 0.0
                     d_ahead = dt_until / step_dt
-                    if 0.0 <= d_ahead <= self.lead:
-                        intensity = max(intensity, 1.0 - d_ahead / self.lead)
+                    if 0.0 <= d_ahead <= eff_lead:
+                        intensity = max(intensity, 1.0 - d_ahead / eff_lead)
             else:
                 # 1. Tail and Hold
                 dt_since = local_t - tr
@@ -1300,20 +1423,20 @@ class PingPongChase(Clip):
                     dt_since = 0.0
                 if dt_since >= 0.0:
                     d_steps = dt_since / step_dt
-                    if d_steps <= self.hold:
+                    if d_steps <= eff_hold:
                         intensity = max(intensity, 1.0)
-                    elif decay_span > 0.0 and (d_steps - self.hold) <= decay_span:
-                        intensity = max(intensity, 1.0 - (d_steps - self.hold) / decay_span)
+                    elif decay_span > 0.0 and (d_steps - eff_hold) <= decay_span:
+                        intensity = max(intensity, 1.0 - (d_steps - eff_hold) / decay_span)
 
                 # 2. Lead ramp-in
-                if self.lead > 0.0:
+                if eff_lead > 0.0:
                     dt_until = tr - local_t
                     if -1e-9 <= dt_until < 0.0:
                         dt_until = 0.0
                     if dt_until >= 0.0:
                         d_ahead = dt_until / step_dt
-                        if d_ahead <= self.lead:
-                            intensity = max(intensity, 1.0 - d_ahead / self.lead)
+                        if d_ahead <= eff_lead:
+                            intensity = max(intensity, 1.0 - d_ahead / eff_lead)
 
         if self.background is not None:
             return Patch(color=self.background.lerp(self.color, intensity))
@@ -1340,6 +1463,9 @@ class Gradient(Clip):
         frac = scaled - idx
         c = self.colors[idx].lerp(self.colors[idx + 1], frac)
         return Patch(color=c)
+
+    def with_duration(self, target_duration: Union[float, Any]) -> Gradient:
+        return Gradient(self.colors, duration=target_duration)
 
 
 class FnClip(Clip):
