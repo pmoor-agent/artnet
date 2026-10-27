@@ -5,6 +5,7 @@
 Traditional lighting control often suffers from imperative spaghetti code: manual byte arrays, hardware tick loops, and scattered timing logic. `lightshow` replaces this with a **declarative, functional timeline**:
 
 - **Continuous Functional Time**: Animations and cues are mathematical functions $f(t) \to \text{State}$, evaluated cleanly at any frame rate (30 Hz, 40 Hz, 60 Hz).
+- **Musical Timing & Dynamic Tempo**: Mix fixed wall-clock seconds (`duration=0.1` for strobes/physics) with musical subdivisions (`Tempo(128).sixteenth`, `beats(1)`, `bars(4)`). Dynamically change BPM or tap-tempo at runtime with zero phase glitches.
 - **Algebraic Composition**: Combine lighting patterns using standard Python idioms and operators:
   - `[A, B, C]` / `Sequence([A, B, C])` for chronological time sequencing
   - `|` for concurrent layering (Last-Takes-Precedence / LTP override)

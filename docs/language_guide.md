@@ -161,6 +161,45 @@ Any clip can be inverted with `~` or ping-ponged back and forth:
 sweep = Fade(Color.RED, Color.BLUE, duration=1.5).pingpong()  # 3.0s total
 ```
 
+### Musical Timing & Dynamic Tempo (`Tempo`, `beats`, `bars`)
+
+In lighting design for music (clubs, concerts, DJ sets), calculating fractional seconds (e.g. $0.46875\text{s}$ at 128 BPM) interrupts creative flow. `lightshow` seamlessly supports both **wall-clock seconds** (for strobes, camera sync, and physics) and **musical time** (bars, beats, subdivisions):
+
+```python
+from lightshow import Tempo, beats, bars, Color, Pulse, Chase, Hold
+
+# 1. Create a tempo instance (e.g. 128 BPM house/techno)
+t = Tempo(128)
+
+# 2. Compose clips using standard musical subdivisions
+kick_pulse  = Pulse(Color.RED, duration=t.quarter)         # 1 beat
+hihat_chase = Chase(Color.CYAN, step_duration=t.sixteenth) # 16th note
+drop_strobe = Hold(Color.WHITE, strobe=0.9, duration=0.1)  # 0.1s fixed physics!
+
+# 3. Structure into musical bars
+groove = PARS(kick_pulse | hihat_chase | drop_strobe) * t.bars(4)
+```
+
+#### Dynamic Runtime Tempo Updates & Tap Tempo
+When `t.bpm` changes at runtime (or via `t.tap()`), all clips bound to `t` dynamically recalculate their duration on the fly. In live background streaming (`stream(groove, tempo=t)`), `LiveStream` preserves the running loop phase so there is **zero glitch or jump** when tempo shifts mid-measure!
+
+```python
+# Speed up live playback from 128 to 134 BPM:
+t.bpm = 134
+
+# Or tap-tempo in real time:
+t.tap()
+```
+
+#### Global Convenience Helpers
+If you don't want to pass a `Tempo` object around, top-level `beats(n)` and `bars(n)` bind to the active default tempo:
+```python
+scene = PARS([
+    Pulse(Color.BLUE, duration=beats(1)),
+    Pulse(Color.PURPLE, duration=beats(1)),
+]) * bars(2)
+```
+
 ---
 
 ## 4. Spatial Composition & Layering
@@ -471,6 +510,19 @@ stop_stream()
 | `group(clip)` | Bind | Bind a `Clip` to a `FixtureGroup`, producing a `BoundScene`. |
 | `g1 + g2` | Group Concat | Combine multiple fixture groups into a single layout. |
 | `g[start:stop]` | Group Slice | Slice fixture elements by index (e.g. `PARS[:4]`, `PARS[::-1]`). |
+
+### Musical Timing & Tempo
+
+| Expression | Name | Description |
+| :--- | :--- | :--- |
+| `Tempo(bpm=120)` | Tempo Clock | Beat clock manager with live BPM modification and tap tempo. |
+| `t.beats(n)` / `beats(n)` | Beat Duration | Duration of $n$ musical beats (e.g. $n=1$ is a quarter note). |
+| `t.bars(n)` / `bars(n)` | Bar Duration | Duration of $n$ musical bars ($n \times 4$ beats in 4/4). |
+| `t.sixteenth` / `t.eighth` | Subdivisions | 16th note ($0.25$ beat), 8th note ($0.5$ beat), etc. |
+| `t.triplet(subdivision)` | Triplet | Musical triplet (e.g. `t.triplet(8)` is an 8th-note triplet). |
+| `t.dotted(subdivision)` | Dotted Note | Dotted note ($1.5\times$ nominal note length). |
+| `t.tap()` | Tap Tempo | Average tap intervals and update BPM dynamically. |
+| `t.bpm = 135` | Live BPM Modulation | Dynamically speeds up/slows down all bound clips with zero phase glitch. |
 
 ### Built-in Clips
 

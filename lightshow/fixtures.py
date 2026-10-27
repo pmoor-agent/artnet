@@ -460,7 +460,23 @@ class FixtureGroup:
 class Scene:
     """Base class for algebraically composable multi-fixture scenes."""
 
-    duration: float = 0.0
+    _duration: Union[float, Any] = 0.0
+
+    @property
+    def duration(self) -> float:
+        """Total duration of the scene in seconds (evaluates dynamically for musical clips)."""
+        return float(self._duration)
+
+    @duration.setter
+    def duration(self, value: Any) -> None:
+        self._duration = value
+
+    @property
+    def duration_beats(self) -> Optional[float]:
+        """Duration in musical beats if bound to a tempo, else None."""
+        if hasattr(self._duration, "beats"):
+            return float(self._duration.beats)
+        return None
 
     def eval_canvas(self, t: float) -> DMXCanvas:
         raise NotImplementedError
@@ -480,8 +496,10 @@ class Scene:
         """`scene1 ^ scene2`: Parallel HTP (`max(a, b)`) on overlapping DMX channels."""
         return LayerScene(self, other, mode="htp")
 
-    def __mul__(self, count: Union[int, float]) -> RepeatScene:
-        """`scene * n`: Loop `scene` `n` times (or `scene * inf`)."""
+    def __mul__(self, count: Union[int, float, Any]) -> RepeatScene:
+        """`scene * n`: Loop `scene` `n` times (or `scene * inf`, or `bars(n)`)."""
+        if hasattr(count, "seconds"):
+            return RepeatScene(self, count=count)
         if count == inf or count == float("inf"):
             return RepeatScene(self, count=inf)
         if isinstance(count, int) or (isinstance(count, float) and count.is_integer()):
@@ -564,7 +582,10 @@ class BoundScene(Scene):
     def __init__(self, group: FixtureGroup, clip: Clip) -> None:
         self.group = group
         self.clip = clip
-        self.duration = clip.duration
+
+    @property
+    def duration(self) -> float:
+        return self.clip.duration
 
     def eval_canvas(self, t: float) -> DMXCanvas:
         canvas = DMXCanvas()
@@ -647,10 +668,12 @@ class LayerScene(Scene):
         self.bottom = bottom
         self.top = top
         self.mode = mode
-        if bottom.duration == inf or top.duration == inf:
-            self.duration = inf
-        else:
-            self.duration = max(bottom.duration, top.duration)
+
+    @property
+    def duration(self) -> float:
+        if self.bottom.duration == inf or self.top.duration == inf:
+            return inf
+        return max(self.bottom.duration, self.top.duration)
 
     def eval_canvas(self, t: float) -> DMXCanvas:
         c_bot = self.bottom.eval_canvas(t)
@@ -710,7 +733,10 @@ class SequenceScene(Scene):
             else:
                 flattened.append(s)
         self.scenes = flattened
-        self.duration = sum(s.duration for s in self.scenes)
+
+    @property
+    def duration(self) -> float:
+        return sum(s.duration for s in self.scenes)
 
     def eval_canvas(self, t: float) -> DMXCanvas:
         if not self.scenes:
@@ -750,12 +776,21 @@ class SequenceScene(Scene):
 class RepeatScene(Scene):
     """Loops a finite `Scene` `count` times (`scene * n` or `scene * inf`)."""
 
-    def __init__(self, child: Scene, count: Union[int, float] = inf) -> None:
+    def __init__(self, child: Scene, count: Union[int, float, Any] = inf) -> None:
         if child.duration <= 0:
             raise ValueError("Cannot repeat a scene with 0 duration.")
         self.child = child
         self.count = count
-        self.duration = child.duration * count
+
+    @property
+    def duration(self) -> float:
+        if self.child.duration == inf:
+            return inf
+        if hasattr(self.count, "seconds"):
+            return float(self.count)
+        if self.count == inf:
+            return inf
+        return self.child.duration * float(self.count)
 
     def eval_canvas(self, t: float) -> DMXCanvas:
         if self.child.duration == inf:
@@ -780,12 +815,20 @@ class RepeatScene(Scene):
 class TimeScaleScene(Scene):
     """Stretches or compresses a finite `Scene` to `target_duration` (`scene @ seconds`)."""
 
-    def __init__(self, child: Scene, target_duration: float) -> None:
+    def __init__(self, child: Scene, target_duration: Union[float, Any]) -> None:
         if child.duration == inf or child.duration <= 0:
             raise ValueError("Can only time-scale finite scenes with positive duration.")
         self.child = child
-        self.duration = float(target_duration)
-        self.rate = child.duration / self.duration
+        self._target_duration = target_duration
+
+    @property
+    def duration(self) -> float:
+        return float(self._target_duration)
+
+    @property
+    def rate(self) -> float:
+        dur = self.duration
+        return self.child.duration / dur if dur > 0 else 1.0
 
     def eval_canvas(self, t: float) -> DMXCanvas:
         return self.child.eval_canvas(t * self.rate)
@@ -810,7 +853,10 @@ class ReverseScene(Scene):
         if child.duration == inf:
             raise ValueError("Cannot time-reverse an infinite scene.")
         self.child = child
-        self.duration = child.duration
+
+    @property
+    def duration(self) -> float:
+        return self.child.duration
 
     def eval_canvas(self, t: float) -> DMXCanvas:
         local_t = max(0.0, min(self.duration, self.duration - t))
@@ -841,16 +887,19 @@ class SliceScene(Scene):
     ) -> None:
         self.child = child
         self.start = max(0.0, float(start if start is not None else 0.0))
-        if stop is None:
-            self.stop = child.duration
-        else:
-            self.stop = max(self.start, float(stop))
+        self._stop = float(stop) if stop is not None else None
         self.step = float(step if step is not None else 1.0)
         if self.step == 0.0:
             raise ValueError("Slice step cannot be zero.")
 
+    @property
+    def stop(self) -> float:
+        return self.child.duration if self._stop is None else max(self.start, self._stop)
+
+    @property
+    def duration(self) -> float:
         raw_dur = self.stop - self.start
-        self.duration = raw_dur / abs(self.step) if not math.isinf(raw_dur) else inf
+        return raw_dur / abs(self.step) if not math.isinf(raw_dur) else inf
 
     def eval_canvas(self, t: float) -> DMXCanvas:
         if t < 0.0 or (t > self.duration and not math.isinf(self.duration)):
@@ -880,7 +929,10 @@ class ScaleScene(Scene):
     def __init__(self, child: Scene, factor: float) -> None:
         self.child = child
         self.factor = factor
-        self.duration = child.duration
+
+    @property
+    def duration(self) -> float:
+        return self.child.duration
 
     def eval_canvas(self, t: float) -> DMXCanvas:
         return self.child.eval_canvas(t).scale(self.factor)

@@ -340,6 +340,7 @@ class LiveStream:
         scene: Union[Scene, Clip],
         rig: Optional[Rig] = None,
         *,
+        tempo: Optional[Tempo] = None,
         host: str = "192.168.1.158",
         universe: int = 1,
         fps: float = 40.0,
@@ -357,6 +358,74 @@ class LiveStream:
         self._thread: Optional[threading.Thread] = None
         self._packets_sent = 0
 
+        self.tempo: Optional[Tempo] = tempo if tempo is not None else self._find_tempo(self._current_scene)
+        if self.tempo is not None:
+            self.tempo.on_change(self._on_tempo_change)
+
+    @staticmethod
+    def _find_tempo(obj: Any) -> Optional[Tempo]:
+        """Attempt to extract bound Tempo from a scene or clip tree."""
+        if hasattr(obj, "clip"):
+            t = LiveStream._find_tempo(obj.clip)
+            if t is not None:
+                return t
+        if hasattr(obj, "scenes"):
+            for s in obj.scenes:
+                t = LiveStream._find_tempo(s)
+                if t is not None:
+                    return t
+        if hasattr(obj, "clips"):
+            for c in obj.clips:
+                t = LiveStream._find_tempo(c)
+                if t is not None:
+                    return t
+        if hasattr(obj, "child"):
+            t = LiveStream._find_tempo(obj.child)
+            if t is not None:
+                return t
+        if hasattr(obj, "bottom"):
+            t = LiveStream._find_tempo(obj.bottom) or LiveStream._find_tempo(getattr(obj, "top", None))
+            if t is not None:
+                return t
+        dur = getattr(obj, "_duration", None)
+        if hasattr(dur, "tempo"):
+            return dur.tempo
+        step_dur = getattr(obj, "step_duration", None)
+        if hasattr(step_dur, "tempo"):
+            return step_dur.tempo
+        return None
+
+    def _on_tempo_change(self, old_bpm: float, new_bpm: float) -> None:
+        """Adjust start time on BPM change to preserve loop phase with zero glitch."""
+        if old_bpm <= 0 or new_bpm <= 0:
+            return
+        with self._scene_lock:
+            scene = self._current_scene
+        dur = scene.duration
+        now = time.monotonic()
+        if dur <= 0 or math.isinf(dur):
+            elapsed = now - self._start_time
+            self._start_time = now - (elapsed * (new_bpm / old_bpm))
+            return
+
+        elapsed = now - self._start_time
+        d_new = dur
+        d_old = dur * (new_bpm / old_bpm)
+        phi_old = elapsed % d_old if d_old > 0 else 0.0
+        phi_new = phi_old * (d_new / d_old) if d_old > 0 else 0.0
+        self._start_time = now - phi_new
+
+    def set_bpm(self, bpm: float) -> None:
+        """Update streaming BPM at runtime."""
+        if self.tempo is not None:
+            self.tempo.bpm = bpm
+
+    def tap(self) -> float:
+        """Tap tempo to sync with live audio."""
+        if self.tempo is not None:
+            return self.tempo.tap()
+        return 120.0
+
     def start(self) -> LiveStream:
         """Start streaming in a background daemon thread."""
         if self._thread is None or not self._thread.is_alive():
@@ -369,6 +438,11 @@ class LiveStream:
         """Hot-swap the playing scene immediately on the fly without stopping DMX."""
         with self._scene_lock:
             self._current_scene = self.rig._to_scene(new_scene)
+            if self.tempo is None:
+                new_t = self._find_tempo(self._current_scene)
+                if new_t is not None:
+                    self.tempo = new_t
+                    self.tempo.on_change(self._on_tempo_change)
 
     def pause(self) -> None:
         """Pause playback and packet transmission."""
@@ -385,6 +459,8 @@ class LiveStream:
     def stop(self) -> None:
         """Stop background streaming and blackout the rig."""
         self._stop_event.set()
+        if self.tempo is not None:
+            self.tempo.remove_callback(self._on_tempo_change)
         if self._thread is not None:
             self._thread.join(timeout=1.0)
             self._thread = None
@@ -422,6 +498,9 @@ class LiveStream:
         status_text = "STREAMING (40 Hz)" if (self.is_alive and self._pause_event.is_set()) else "PAUSED"
         host = self.rig.client.host
         univ = self.rig.client.universe
+        tempo_badge = ""
+        if self.tempo is not None:
+            tempo_badge = f'<span style="font-size: 12px; background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 2px 8px; color: #38bdf8; font-weight: 500;">🎵 {self.tempo.bpm:g} BPM</span>'
 
         return f"""
         <div style="font-family: system-ui, -apple-system, sans-serif; background: #0e1117; 
@@ -431,6 +510,7 @@ class LiveStream:
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: {status_color};"></span>
                     <strong style="font-size: 13px; letter-spacing: 0.5px;">{status_text}</strong>
+                    {tempo_badge}
                 </div>
                 <span style="font-size: 12px; color: #9ca3af; font-family: monospace;">{host} (Univ {univ})</span>
             </div>
@@ -448,6 +528,7 @@ def stream(
     scene: Union[Scene, Clip],
     rig: Optional[Rig] = None,
     *,
+    tempo: Optional[Tempo] = None,
     host: str = "192.168.1.158",
     universe: int = 1,
     fps: float = 40.0,
@@ -460,9 +541,14 @@ def stream(
     global _active_stream
     if _active_stream is not None and _active_stream.is_alive:
         _active_stream.update(scene)
+        if tempo is not None:
+            if _active_stream.tempo is not None:
+                _active_stream.tempo.remove_callback(_active_stream._on_tempo_change)
+            _active_stream.tempo = tempo
+            _active_stream.tempo.on_change(_active_stream._on_tempo_change)
         return _active_stream
 
-    _active_stream = LiveStream(scene, rig=rig, host=host, universe=universe, fps=fps)
+    _active_stream = LiveStream(scene, rig=rig, tempo=tempo, host=host, universe=universe, fps=fps)
     _active_stream.start()
     return _active_stream
 

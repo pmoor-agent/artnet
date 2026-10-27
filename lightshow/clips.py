@@ -53,7 +53,23 @@ class Clip:
     and evaluates to a `Patch` at `(t, fixture_index, total_fixtures)`.
     """
 
-    duration: float = 0.0
+    _duration: Union[float, Any] = 0.0
+
+    @property
+    def duration(self) -> float:
+        """Total duration of the clip in seconds (evaluates dynamically for musical clips)."""
+        return float(self._duration)
+
+    @duration.setter
+    def duration(self, value: Any) -> None:
+        self._duration = value
+
+    @property
+    def duration_beats(self) -> Optional[float]:
+        """Duration in musical beats if bound to a tempo, else None."""
+        if hasattr(self._duration, "beats"):
+            return float(self._duration.beats)
+        return None
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         """Evaluate the clip at local time `t` (seconds) for `fixture` (0-indexed)."""
@@ -79,8 +95,10 @@ class Clip:
         """`a & b`: Multiplicative mask/envelope (e.g. `Rainbow(period=14.4) & spot_envelope`)."""
         return LayerClip(self, other, mode="multiply")
 
-    def __mul__(self, count: Union[int, float]) -> Clip:
-        """`clip * n`: Repeat clip `n` times (use `math.inf` for infinite loop)."""
+    def __mul__(self, count: Union[int, float, Any]) -> Clip:
+        """`clip * n`: Repeat clip `n` times (use `math.inf` for infinite loop, or `bars(n)`)."""
+        if hasattr(count, "seconds"):
+            return RepeatClip(self, count=count)
         if count == inf or count == float("inf"):
             return RepeatClip(self, count=inf)
         if isinstance(count, int) or (isinstance(count, float) and count.is_integer()):
@@ -304,7 +322,10 @@ class SequenceClip(Clip):
             else:
                 flattened.append(c)
         self.clips = flattened
-        self.duration = sum(c.duration for c in self.clips)
+
+    @property
+    def duration(self) -> float:
+        return sum(c.duration for c in self.clips)
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         if not self.clips:
@@ -331,10 +352,12 @@ class LayerClip(Clip):
         self.bottom = bottom
         self.top = top
         self.mode = mode
-        if bottom.duration == inf or top.duration == inf:
-            self.duration = inf
-        else:
-            self.duration = max(bottom.duration, top.duration)
+
+    @property
+    def duration(self) -> float:
+        if self.bottom.duration == inf or self.top.duration == inf:
+            return inf
+        return max(self.bottom.duration, self.top.duration)
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         p_bot = self.bottom.eval(t, fixture, total_fixtures) if t <= self.bottom.duration else Patch()
@@ -356,12 +379,21 @@ class LayerClip(Clip):
 class RepeatClip(Clip):
     """Repeats a finite clip `count` times (`clip * n` or `clip * inf`)."""
 
-    def __init__(self, child: Clip, count: Union[int, float] = inf) -> None:
+    def __init__(self, child: Clip, count: Union[int, float, Any] = inf) -> None:
         if child.duration <= 0:
             raise ValueError("Cannot repeat a clip with 0 duration.")
         self.child = child
         self.count = count
-        self.duration = child.duration * count
+
+    @property
+    def duration(self) -> float:
+        if self.child.duration == inf:
+            return inf
+        if hasattr(self.count, "seconds"):
+            return float(self.count)
+        if self.count == inf:
+            return inf
+        return self.child.duration * float(self.count)
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         if self.child.duration == inf:
@@ -381,14 +413,22 @@ class RepeatClip(Clip):
 class TimeScaleClip(Clip):
     """Stretches or compresses a finite clip to `target_duration` (`clip @ seconds`)."""
 
-    def __init__(self, child: Clip, target_duration: float) -> None:
+    def __init__(self, child: Clip, target_duration: Union[float, Any]) -> None:
         if child.duration == inf or child.duration <= 0:
             raise ValueError("Can only time-scale finite clips with positive duration.")
         if target_duration <= 0:
             raise ValueError("Target duration must be positive.")
         self.child = child
-        self.duration = float(target_duration)
-        self.rate = child.duration / self.duration
+        self._target_duration = target_duration
+
+    @property
+    def duration(self) -> float:
+        return float(self._target_duration)
+
+    @property
+    def rate(self) -> float:
+        dur = self.duration
+        return self.child.duration / dur if dur > 0 else 1.0
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         return self.child.eval(t * self.rate, fixture, total_fixtures)
@@ -401,7 +441,10 @@ class ReverseClip(Clip):
         if child.duration == inf:
             raise ValueError("Cannot time-reverse an infinite clip.")
         self.child = child
-        self.duration = child.duration
+
+    @property
+    def duration(self) -> float:
+        return self.child.duration
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         local_t = max(0.0, min(self.duration, self.duration - t))
@@ -426,16 +469,19 @@ class SliceClip(Clip):
     ) -> None:
         self.child = child
         self.start = max(0.0, float(start if start is not None else 0.0))
-        if stop is None:
-            self.stop = child.duration
-        else:
-            self.stop = max(self.start, float(stop))
+        self._stop = float(stop) if stop is not None else None
         self.step = float(step if step is not None else 1.0)
         if self.step == 0.0:
             raise ValueError("Slice step cannot be zero.")
 
+    @property
+    def stop(self) -> float:
+        return self.child.duration if self._stop is None else max(self.start, self._stop)
+
+    @property
+    def duration(self) -> float:
         raw_dur = self.stop - self.start
-        self.duration = raw_dur / abs(self.step) if not math.isinf(raw_dur) else inf
+        return raw_dur / abs(self.step) if not math.isinf(raw_dur) else inf
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         if t < 0.0 or (t > self.duration and not math.isinf(self.duration)):
@@ -460,7 +506,10 @@ class PhaseClip(Clip):
         self.child = child
         self.offset_per_fixture = offset_per_fixture
         self.wrap = wrap
-        self.duration = child.duration
+
+    @property
+    def duration(self) -> float:
+        return self.child.duration
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         shifted = t - fixture * self.offset_per_fixture
@@ -500,14 +549,16 @@ class StaggerClip(Clip):
         if child.duration == inf:
             raise ValueError("Use `.phase(offset)` for infinite clips, or `.stagger(offset)` for finite clips.")
         self.child = child
-        self.offset_per_fixture = float(offset_per_fixture)
+        self.offset_per_fixture = offset_per_fixture
         self.fixtures = max(1, int(fixtures))
         self.bounce = bounce
-        step = abs(self.offset_per_fixture)
+
+    @property
+    def duration(self) -> float:
+        step = abs(float(self.offset_per_fixture))
         if self.bounce and self.fixtures > 1:
-            self.duration = 2.0 * (self.fixtures - 1) * step
-        else:
-            self.duration = child.duration + (self.fixtures - 1) * step
+            return 2.0 * (self.fixtures - 1) * step
+        return self.child.duration + (self.fixtures - 1) * step
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         step = abs(self.offset_per_fixture)
@@ -561,7 +612,10 @@ class EnvelopeClip(Clip):
         self.fade_in_dur = max(0.0, float(fade_in))
         self.fade_out_dur = max(0.0, float(fade_out))
         self.ease_fn = ease
-        self.duration = child.duration
+
+    @property
+    def duration(self) -> float:
+        return self.child.duration
 
     def fade_in(
         self,
@@ -618,7 +672,10 @@ class SpreadClip(Clip):
     def __init__(self, child: Clip, total_offset: Optional[float] = None) -> None:
         self.child = child
         self.total_offset = total_offset
-        self.duration = child.duration
+
+    @property
+    def duration(self) -> float:
+        return self.child.duration
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         span = self.total_offset if self.total_offset is not None else (
@@ -643,7 +700,10 @@ class MaskClip(Clip):
     def __init__(self, child: Clip, allowed_fixtures: frozenset[int]) -> None:
         self.child = child
         self.allowed_fixtures = allowed_fixtures
-        self.duration = child.duration
+
+    @property
+    def duration(self) -> float:
+        return self.child.duration
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         if fixture not in self.allowed_fixtures:
@@ -662,7 +722,10 @@ class MirrorClip(Clip):
 
     def __init__(self, child: Clip) -> None:
         self.child = child
-        self.duration = child.duration
+
+    @property
+    def duration(self) -> float:
+        return self.child.duration
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         mirrored_idx = min(fixture, total_fixtures - 1 - fixture)
@@ -681,7 +744,10 @@ class ReverseFixturesClip(Clip):
 
     def __init__(self, child: Clip) -> None:
         self.child = child
-        self.duration = child.duration
+
+    @property
+    def duration(self) -> float:
+        return self.child.duration
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         rev_idx = max(0, total_fixtures - 1 - fixture)
@@ -701,7 +767,10 @@ class ScaleClip(Clip):
         self.child = child
         self.factor = factor
         self.attr = attr
-        self.duration = child.duration
+
+    @property
+    def duration(self) -> float:
+        return self.child.duration
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         return self.child.eval(t, fixture, total_fixtures).scale(self.factor, attr=self.attr)
@@ -719,7 +788,10 @@ class ChannelMapClip(Clip):
     def __init__(self, child: Clip, target_channel: str) -> None:
         self.child = child
         self.target_channel = target_channel
-        self.duration = child.duration
+
+    @property
+    def duration(self) -> float:
+        return self.child.duration
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         p = self.child.eval(t, fixture, total_fixtures)
@@ -742,8 +814,8 @@ class ChannelMapClip(Clip):
 class Wait(Clip):
     """Transparent clip that waits for `duration` seconds without overriding channels."""
 
-    def __init__(self, duration: float) -> None:
-        self.duration = float(duration)
+    def __init__(self, duration: Union[float, Any]) -> None:
+        self.duration = duration
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         return Patch()
@@ -760,10 +832,10 @@ class Hold(Clip):
         self,
         color_or_val: Optional[Union[Color, float]] = None,
         *,
-        duration: float = inf,
+        duration: Union[float, Any] = inf,
         **channels: Optional[float],
     ) -> None:
-        self.duration = float(duration)
+        self.duration = duration
         clean_channels: dict[str, float] = {
             k: float(v) for k, v in channels.items() if v is not None
         }
@@ -775,10 +847,12 @@ class Hold(Clip):
         self.channels = clean_channels
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
-        return Patch(color=self.color, channels=dict(self.channels))
+        if t <= float(self.duration):
+            return Patch(color=self.color, channels=dict(self.channels))
+        return Patch()
 
 
-def Blackout(duration: float = inf) -> Hold:
+def Blackout(duration: Union[float, Any] = inf) -> Hold:
     """Turn RGB and common intensity/strobe channels off (0.0)."""
     return Hold(Color.BLACK, duration=duration, w=0.0, strobe=0.0, value=0.0)
 
@@ -790,7 +864,7 @@ class Fade(Clip):
         self,
         start: Optional[Union[Color, float]] = None,
         end: Optional[Union[Color, float]] = None,
-        duration: float = 1.0,
+        duration: Union[float, Any] = 1.0,
         *,
         channel: str = "value",
         ease: Callable[[float], float] = Ease.in_out_sine,
@@ -798,11 +872,12 @@ class Fade(Clip):
         self.start = start
         self.end = end
         self.channel = channel
-        self.duration = float(duration)
+        self.duration = duration
         self.ease_fn = ease
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
-        u = 1.0 if self.duration <= 0 else max(0.0, min(1.0, t / self.duration))
+        dur = float(self.duration)
+        u = 1.0 if dur <= 0 else max(0.0, min(1.0, t / dur))
         alpha = self.ease_fn(u)
 
         if isinstance(self.start, Color) and isinstance(self.end, Color):
@@ -819,15 +894,15 @@ class Pulse(Clip):
     def __init__(
         self,
         color_or_peak: Union[Color, float] = 1.0,
-        duration: Optional[float] = None,
+        duration: Optional[Union[float, Any]] = None,
         *,
         low: float = 0.0,
         high: float = 1.0,
-        lead: Optional[float] = None,
-        hold: float = 0.0,
-        tail: Optional[float] = None,
-        attack: Optional[float] = None,
-        decay: Optional[float] = None,
+        lead: Optional[Union[float, Any]] = None,
+        hold: Union[float, Any] = 0.0,
+        tail: Optional[Union[float, Any]] = None,
+        attack: Optional[Union[float, Any]] = None,
+        decay: Optional[Union[float, Any]] = None,
         channel: str = "value",
         ease: Callable[[float], float] = Ease.in_out_sine,
     ) -> None:
@@ -840,53 +915,62 @@ class Pulse(Clip):
         # Resolve aliases: lead/attack, tail/decay
         eff_lead = attack if lead is None else lead
         eff_tail = decay if tail is None else tail
-        self.hold = max(0.0, float(hold))
+        self.hold = hold
 
         if duration is None:
             if eff_lead is None and eff_tail is None:
                 self.duration = 1.0
-                t_hold = min(self.duration, self.hold)
-                rem = max(0.0, self.duration - t_hold)
+                rem = max(0.0, float(self.duration) - float(self.hold))
                 self.lead = rem / 2.0
                 self.tail = rem / 2.0
             else:
-                self.lead = max(0.0, float(eff_lead or 0.0))
-                self.tail = max(0.0, float(eff_tail or 0.0))
+                self.lead = eff_lead if eff_lead is not None else 0.0
+                self.tail = eff_tail if eff_tail is not None else 0.0
                 self.duration = self.lead + self.hold + self.tail
         else:
-            self.duration = max(0.0, float(duration))
-            t_hold = min(self.duration, self.hold)
-            rem = max(0.0, self.duration - t_hold)
+            self.duration = duration
             if eff_lead is None and eff_tail is None:
+                rem = self._duration - self.hold
                 self.lead = rem / 2.0
                 self.tail = rem / 2.0
             elif eff_lead is not None and eff_tail is None:
-                self.lead = min(rem, max(0.0, float(eff_lead)))
-                self.tail = max(0.0, rem - self.lead)
+                self.lead = eff_lead
+                rem = self._duration - self.hold
+                self.tail = rem - self.lead
             elif eff_lead is None and eff_tail is not None:
-                self.tail = min(rem, max(0.0, float(eff_tail)))
-                self.lead = max(0.0, rem - self.tail)
+                self.tail = eff_tail
+                rem = self._duration - self.hold
+                self.lead = rem - self.tail
             else:
-                self.lead = max(0.0, float(eff_lead))
-                self.tail = max(0.0, float(eff_tail))
+                self.lead = eff_lead
+                self.tail = eff_tail
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
-        if self.duration <= 0:
+        dur = float(self.duration)
+        if dur <= 0:
             level = self.high
-        elif t < 0.0 or t >= self.duration:
+        elif t < 0.0 or t >= dur:
             level = self.low
-        elif self.lead > 0.0 and t < self.lead:
-            u = t / self.lead
-            level = self.low + (self.high - self.low) * self.ease_fn(u)
-        elif t <= (self.lead + self.hold):
-            level = self.high
         else:
-            decay_elapsed = t - (self.lead + self.hold)
-            if self.tail <= 0.0:
-                level = self.low
+            t_lead = float(self.lead)
+            t_hold = float(self.hold)
+            t_tail = float(self.tail)
+            if t_lead > 0.0 and t < t_lead:
+                u = t / t_lead
+                level = self.low + (self.high - self.low) * self.ease_fn(u)
+            elif t <= (t_lead + t_hold):
+                level = self.high
             else:
-                u = min(1.0, max(0.0, decay_elapsed / self.tail))
-                level = self.low + (self.high - self.low) * self.ease_fn(1.0 - u)
+                decay_elapsed = t - (t_lead + t_hold)
+                if t_tail <= 0.0:
+                    level = self.low
+                else:
+                    u = min(1.0, max(0.0, decay_elapsed / t_tail))
+                    level = self.low + (self.high - self.low) * self.ease_fn(1.0 - u)
+
+        if isinstance(self.color_or_peak, Color):
+            return Patch(color=self.color_or_peak * level)
+        return Patch.from_channel(self.channel, float(self.color_or_peak) * level)
 
         if isinstance(self.color_or_peak, Color):
             return Patch(color=self.color_or_peak * level)
@@ -899,12 +983,12 @@ class Strobe(Clip):
     def __init__(
         self,
         rate: float = 0.8,
-        duration: float = 1.0,
+        duration: Union[float, Any] = 1.0,
         color: Optional[Color] = None,
         w: Optional[float] = None,
     ) -> None:
         self.rate = max(0.0, min(1.0, rate))
-        self.duration = float(duration)
+        self.duration = duration
         self.color = color
         self.w = w
 
@@ -923,14 +1007,14 @@ class SineLFO(Clip):
         period: float = 2.0,
         low: float = 0.1,
         high: float = 1.0,
-        duration: float = inf,
+        duration: Union[float, Any] = inf,
         *,
         channel: str = "dimmer",
     ) -> None:
         self.period = float(period)
         self.low = low
         self.high = high
-        self.duration = float(duration)
+        self.duration = duration
         self.channel = channel
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
@@ -948,13 +1032,13 @@ class Rainbow(Clip):
 
     def __init__(
         self,
-        period: float = 4.0,
-        duration: Optional[float] = None,
+        period: Union[float, Any] = 4.0,
+        duration: Optional[Union[float, Any]] = None,
         saturation: float = 1.0,
         value: float = 1.0,
     ) -> None:
-        self.period = float(period)
-        self.duration = float(period if duration is None else duration)
+        self.period = period
+        self.duration = period if duration is None else duration
         self.saturation = saturation
         self.value = value
 
@@ -969,7 +1053,7 @@ class Chase(Clip):
     def __init__(
         self,
         color: Union[Color, float] = Color.WHITE,
-        step_duration: float = 0.25,
+        step_duration: Union[float, Any] = 0.25,
         *,
         background: Optional[Union[Color, float]] = Color.BLACK,
         lead: float = 0.0,
@@ -984,7 +1068,7 @@ class Chase(Clip):
             self.background: Optional[Color] = Color(background, background, background)
         else:
             self.background = background
-        self.step_duration = float(step_duration)
+        self.step_duration = step_duration if hasattr(step_duration, "seconds") else float(step_duration)
         self.lead = max(0.0, float(lead))
         self.hold = max(0.0, float(hold))
         self.tail = max(0.0, float(tail))
@@ -1114,7 +1198,7 @@ class PingPongChase(Clip):
     def __init__(
         self,
         color: Union[Color, float] = Color.WHITE,
-        step_duration: float = 0.25,
+        step_duration: Union[float, Any] = 0.25,
         *,
         background: Optional[Union[Color, float]] = Color.BLACK,
         lead: float = 0.0,
@@ -1129,7 +1213,7 @@ class PingPongChase(Clip):
             self.background: Optional[Color] = Color(background, background, background)
         else:
             self.background = background
-        self.step_duration = float(step_duration)
+        self.step_duration = step_duration if hasattr(step_duration, "seconds") else float(step_duration)
         self.lead = max(0.0, float(lead))
         self.hold = max(0.0, float(hold))
         self.tail = max(0.0, float(tail))
@@ -1241,14 +1325,15 @@ class PingPongChase(Clip):
 class Gradient(Clip):
     """Cycle smoothly through a sequence of colors over `duration` seconds."""
 
-    def __init__(self, colors: SeqType[Color], duration: float = 4.0) -> None:
+    def __init__(self, colors: SeqType[Color], duration: Union[float, Any] = 4.0) -> None:
         if len(colors) < 2:
             raise ValueError("Gradient requires at least 2 colors.")
         self.colors = list(colors)
-        self.duration = float(duration)
+        self.duration = duration
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
-        u = 0.0 if self.duration <= 0 else max(0.0, min(1.0, t / self.duration))
+        dur = float(self.duration)
+        u = 0.0 if dur <= 0 else max(0.0, min(1.0, t / dur))
         segments = len(self.colors) - 1
         scaled = u * segments
         idx = min(segments - 1, int(scaled))
@@ -1263,10 +1348,10 @@ class FnClip(Clip):
     def __init__(
         self,
         fn: Callable[[float, int, int], Union[Patch, Color]],
-        duration: float = inf,
+        duration: Union[float, Any] = inf,
     ) -> None:
         self.fn = fn
-        self.duration = float(duration)
+        self.duration = duration
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
         res = self.fn(t, fixture, total_fixtures)
@@ -1297,10 +1382,10 @@ class CCT(Clip):
     Controls both 'ww' and 'cw' channels according to the physical BCL LED mixing curve.
     """
 
-    def __init__(self, kelvin: float, brightness: float = 1.0, duration: float = inf) -> None:
+    def __init__(self, kelvin: float, brightness: float = 1.0, duration: Union[float, Any] = inf) -> None:
         self.kelvin = float(kelvin)
         self.brightness = float(brightness)
-        self.duration = float(duration)
+        self.duration = duration
         ww, cw = kelvin_to_ww_cw(self.kelvin, self.brightness)
         self.channels = {"ww": ww, "cw": cw, "w": cw}
 
@@ -1315,18 +1400,19 @@ class FadeCCT(Clip):
         self,
         start_k: float,
         end_k: float,
-        duration: float = 1.0,
+        duration: Union[float, Any] = 1.0,
         brightness: float = 1.0,
         ease: Callable[[float], float] = Ease.in_out_sine,
     ) -> None:
         self.start_k = float(start_k)
         self.end_k = float(end_k)
-        self.duration = float(duration)
+        self.duration = duration
         self.brightness = float(brightness)
         self.ease_fn = ease
 
     def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
-        progress = max(0.0, min(1.0, t / self.duration)) if self.duration > 0 else 1.0
+        dur = float(self.duration)
+        progress = max(0.0, min(1.0, t / dur)) if dur > 0 else 1.0
         eased = self.ease_fn(progress)
         k = self.start_k + (self.end_k - self.start_k) * eased
         ww, cw = kelvin_to_ww_cw(k, self.brightness)
@@ -1415,7 +1501,7 @@ class Noise(Clip):
         self.octaves = max(1, int(octaves))
         self.seed = int(seed)
         self.decorrelate = float(decorrelate)
-        self.duration = float(duration)
+        self.duration = duration
 
     def sample(self, t: float, fixture: int = 0) -> float:
         x = t * self.speed + fixture * self.decorrelate
@@ -1468,7 +1554,7 @@ class Flicker(Clip):
         self.octaves = max(1, int(octaves))
         self.seed = int(seed)
         self.decorrelate = float(decorrelate)
-        self.duration = child.duration if child is not None else float(duration)
+        self.duration = child.duration if child is not None else duration
 
     def sample_factor(self, t: float, fixture: int = 0) -> float:
         x = t * self.speed + fixture * self.decorrelate
@@ -1569,7 +1655,7 @@ class HueShift(Clip):
         elif isinstance(dh, Clip):
             self.duration = dh.duration
         else:
-            self.duration = float(duration)
+            self.duration = duration
 
     def sample_dh(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> float:
         if self.amount > 0.0:

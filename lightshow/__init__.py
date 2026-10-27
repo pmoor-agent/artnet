@@ -64,6 +64,14 @@ from .fixtures import (
     TimeScaleScene,
 )
 from .state import Color, ParPatch, Patch
+from .tempo import (
+    MusicalDuration,
+    Tempo,
+    bars,
+    beats,
+    get_tempo,
+    set_bpm,
+)
 
 __all__ = [
     "ARTNET_PORT",
@@ -92,6 +100,7 @@ __all__ = [
     "LayerScene",
     "MaskClip",
     "MirrorClip",
+    "MusicalDuration",
     "Noise",
     "ParPatch",
     "Patch",
@@ -119,14 +128,19 @@ __all__ = [
     "SliceScene",
     "SpreadClip",
     "Strobe",
+    "Tempo",
     "TimeScaleClip",
     "TimeScaleScene",
     "Wait",
+    "bars",
+    "beats",
     "build_artdmx_packet",
     "ch",
     "dim",
     "fbm_noise1d",
+    "get_tempo",
     "inf",
     "kelvin_to_ww_cw",
+    "set_bpm",
     "smooth_noise1d",
 ]
