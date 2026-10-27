@@ -21,6 +21,7 @@ from lightshow import (
     Fade,
     Hold,
     Rainbow,
+    Sequence,
     Wait,
     Blackout,
     Ease,
@@ -121,7 +122,7 @@ def build_movement_2_checkerboard() -> tuple:
 
     # First half (3s): Lime vs Magenta
     flash_lime = Pulse(ELECTRIC_LIME, lead=0.03, hold=0.10, tail=0.37) * 6
-    flash_pink = (Wait(0.25) >> (Pulse(HOT_MAGENTA, lead=0.03, hold=0.10, tail=0.37) * 5) >> Wait(0.25))
+    flash_pink = Sequence([Wait(0.25), Pulse(HOT_MAGENTA, lead=0.03, hold=0.10, tail=0.37) * 5, Wait(0.25)])
 
     part_a = (
         ROW_TOP(flash_lime.on(0, 2, 4, 6) | flash_pink.on(1, 3, 5, 7))
@@ -130,7 +131,7 @@ def build_movement_2_checkerboard() -> tuple:
 
     # Second half (3s): Gold vs Deep Purple with white diode hits
     flash_gold = Pulse(DISCO_GOLD, lead=0.03, hold=0.10, tail=0.37) * 6
-    flash_purp = (Wait(0.25) >> (Pulse(DEEP_PURPLE, lead=0.03, hold=0.10, tail=0.37) * 5) >> Wait(0.25))
+    flash_purp = Sequence([Wait(0.25), Pulse(DEEP_PURPLE, lead=0.03, hold=0.10, tail=0.37) * 5, Wait(0.25)])
 
     part_b = (
         ROW_TOP(flash_purp.on(0, 2, 4, 6) | flash_gold.on(1, 3, 5, 7))
@@ -138,9 +139,9 @@ def build_movement_2_checkerboard() -> tuple:
     )
 
     # Add white LED accent punch on odd beats
-    white_kick = ch("w", (Pulse(1.0, lead=0.02, hold=0.05, tail=0.18) >> Wait(0.25)) * 12)
+    white_kick = ch("w", Sequence([Pulse(1.0, lead=0.02, hold=0.05, tail=0.18), Wait(0.25)]) * 12)
 
-    return (part_a >> part_b) | (ROW_TOP(white_kick) | ROW_BOT(white_kick))
+    return Sequence([part_a, part_b]) | (ROW_TOP(white_kick) | ROW_BOT(white_kick))
 
 
 def build_movement_3_mirror_ripple() -> tuple:
@@ -211,10 +212,11 @@ def build_movement_5_peak_drop() -> tuple:
 
     # Massive quarter-note white/cyan stabs on the beat
     beat_stab = (
-        (Pulse(WARM_WHITE, lead=0.02, hold=0.06, tail=0.22) | ch("w", Pulse(1.0, lead=0.02, hold=0.06, tail=0.22)))
-        >> Wait(0.20)
-    ) * 9  # 9 beat hits over 4.5s
-    beat_stab = beat_stab @ drop_dur
+        Sequence([
+            (Pulse(WARM_WHITE, lead=0.02, hold=0.06, tail=0.22) | ch("w", Pulse(1.0, lead=0.02, hold=0.06, tail=0.22))),
+            Wait(0.20),
+        ]) * 9  # 9 beat hits over 4.5s
+    ) @ drop_dur
 
     drop_section = (
         ROW_TOP(fast_chase_top + beat_stab.scale(0.6))
@@ -232,7 +234,7 @@ def build_movement_5_peak_drop() -> tuple:
         | ROW_BOT(warm_glow & fade_envelope)
     )
 
-    return drop_section >> finale_section
+    return Sequence([drop_section, finale_section])
 
 
 # =============================================================================
@@ -247,7 +249,7 @@ def create_disco_show():
     m4 = build_movement_4_rainbow_spiral()  # 18.0s - 24.0s
     m5 = build_movement_5_peak_drop()       # 24.0s - 30.0s
 
-    disco_show = m1 >> m2 >> m3 >> m4 >> m5
+    disco_show = Sequence([m1, m2, m3, m4, m5])
     return disco_show
 
 

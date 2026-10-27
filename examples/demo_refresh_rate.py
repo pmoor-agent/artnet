@@ -16,14 +16,14 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from lightshow import Blackout, Color, Hold, inf
+from lightshow import Blackout, Color, Hold, Sequence, inf
 from my_rig import PARS, run_show_cli
 
 
 def make_square_wave(freq_hz: float, color: Color = Color.WHITE, w: float = 1.0):
     """Square wave on/off toggle at freq_hz with full RGB + W."""
     half_period = 0.5 / freq_hz
-    return (Hold(color, w=w, duration=half_period) >> Blackout(duration=half_period)) * inf
+    return Sequence([Hold(color, w=w, duration=half_period), Blackout(duration=half_period)]) * inf
 
 
 def build_refresh_test_show():

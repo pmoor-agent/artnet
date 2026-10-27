@@ -28,6 +28,7 @@ from lightshow import (
     Fade,
     Hold,
     Rainbow,
+    Sequence,
     inf,
 )
 from my_rig import PARS, STROBE_BAR, STROBE_MASTER, create_rig
@@ -61,7 +62,7 @@ def build_strobe_colors_show():
     # -------------------------------------------------------------------------
     part3_colors = Rainbow(period=3.0).spread() * 4
 
-    bar_sequence = (part1_colors >> part2_colors >> part3_colors) * inf
+    bar_sequence = Sequence([part1_colors, part2_colors, part3_colors]) * inf
 
     # -------------------------------------------------------------------------
     # Channel 21 Strobe Sequence:
@@ -69,13 +70,13 @@ def build_strobe_colors_show():
     # 12-18s: Ramp up (0->1), 18-24s: Ramp down (1->0)
     # 24-36s: Solid 60% strobe speed (~14 Hz)
     # -------------------------------------------------------------------------
-    strobe_ramp_12s = (
-        Fade(0.0, 1.0, duration=6.0, ease=Ease.linear)
-        >> Fade(1.0, 0.0, duration=6.0, ease=Ease.linear)
-    )
+    strobe_ramp_12s = Sequence([
+        Fade(0.0, 1.0, duration=6.0, ease=Ease.linear),
+        Fade(1.0, 0.0, duration=6.0, ease=Ease.linear),
+    ])
     strobe_steady = Hold(0.60, duration=12.0)
 
-    strobe_sequence = (strobe_ramp_12s >> strobe_ramp_12s >> strobe_steady) * inf
+    strobe_sequence = Sequence([strobe_ramp_12s, strobe_ramp_12s, strobe_steady]) * inf
 
     # PARs stay off so the strobe bar is isolated
     pars_off = Hold(Color.BLACK, duration=36.0) * inf

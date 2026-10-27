@@ -12,6 +12,7 @@ from lightshow import (
     Color,
     Gradient,
     Rainbow,
+    Sequence,
     Strobe,
     dim,
     inf,
@@ -32,18 +33,18 @@ def build_sideways_show():
     ]
 
     # 1. Multi-color palette wave sweeping L->R (6.4s) then R->L (6.4s)
-    pars_wave = (
-        Gradient(palette, duration=3.2).spread(total_offset=2.4) * 2
-        >> Gradient(palette, duration=3.2).spread(total_offset=2.4).reverse_fixtures() * 2
-    )
-    rgb8_wave = (
-        Gradient(palette, duration=3.2).spread(total_offset=3.2) * 2
-        >> Gradient(palette, duration=3.2).spread(total_offset=3.2).reverse_fixtures() * 2
-    )
-    w8_wave = (
-        Chase(Color.WHITE, step_duration=0.4, tail=1.5) * 4
-        >> Chase(Color.WHITE, step_duration=0.4, tail=1.5).reverse_fixtures() * 4
-    )
+    pars_wave = Sequence([
+        Gradient(palette, duration=3.2).spread(total_offset=2.4) * 2,
+        Gradient(palette, duration=3.2).spread(total_offset=2.4).reverse_fixtures() * 2,
+    ])
+    rgb8_wave = Sequence([
+        Gradient(palette, duration=3.2).spread(total_offset=3.2) * 2,
+        Gradient(palette, duration=3.2).spread(total_offset=3.2).reverse_fixtures() * 2,
+    ])
+    w8_wave = Sequence([
+        Chase(Color.WHITE, step_duration=0.4, tail=1.5) * 4,
+        Chase(Color.WHITE, step_duration=0.4, tail=1.5).reverse_fixtures() * 4,
+    ])
 
     # 2. Colliding Comets (Cyan L->R + Magenta R->L)
     pars_comets = (
@@ -67,10 +68,7 @@ def build_sideways_show():
             Chase(c, step_duration=0.12, background=Color.BLACK, tail=tail).pingpong()
             for c in scanner_colors
         ]
-        seq = passes[0]
-        for p in passes[1:]:
-            seq = seq >> p
-        return seq
+        return Sequence(passes)
 
     pars_scanner = _build_scanner(tail=0.9)
     rgb8_scanner = _build_scanner(tail=2.5)
@@ -79,22 +77,22 @@ def build_sideways_show():
     )
 
     # 4. High-speed Rainbow Ripple (6.4s) + Sideways Strobe Finale (2.4s)
-    pars_ripple = (
-        Rainbow(period=1.6).phase(0.35) * 4
-        >> (Rainbow(period=1.2).phase(0.25) * 2 | Strobe(rate=0.7, duration=0.6).phase(0.15) * 4)
-    )
-    rgb8_ripple = (
-        Rainbow(period=1.6).spread() * 4
-        >> Rainbow(period=0.6).spread() * 4
-    )
-    w8_ripple = (
-        Blackout(duration=6.4)
-        >> Chase(Color.WHITE, step_duration=0.075, background=Color.BLACK, tail=0.5).pingpong() * 4
-    )
+    pars_ripple = Sequence([
+        Rainbow(period=1.6).phase(0.35) * 4,
+        (Rainbow(period=1.2).phase(0.25) * 2 | Strobe(rate=0.7, duration=0.6).phase(0.15) * 4),
+    ])
+    rgb8_ripple = Sequence([
+        Rainbow(period=1.6).spread() * 4,
+        Rainbow(period=0.6).spread() * 4,
+    ])
+    w8_ripple = Sequence([
+        Blackout(duration=6.4),
+        Chase(Color.WHITE, step_duration=0.075, background=Color.BLACK, tail=0.5).pingpong() * 4,
+    ])
 
-    pars_anim = (pars_wave >> pars_comets >> pars_scanner >> pars_ripple) * inf
-    w8_anim = (w8_wave >> w8_comets >> w8_scanner >> w8_ripple) * inf
-    rgb8_anim = (rgb8_wave >> rgb8_comets >> rgb8_scanner >> rgb8_ripple) * inf
+    pars_anim = Sequence([pars_wave, pars_comets, pars_scanner, pars_ripple]) * inf
+    w8_anim = Sequence([w8_wave, w8_comets, w8_scanner, w8_ripple]) * inf
+    rgb8_anim = Sequence([rgb8_wave, rgb8_comets, rgb8_scanner, rgb8_ripple]) * inf
 
     return (
         PARS(pars_anim)

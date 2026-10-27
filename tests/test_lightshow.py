@@ -18,6 +18,7 @@ from lightshow import (
     Noise,
     Patch,
     Rig,
+    Sequence,
     Strobe,
     build_artdmx_packet,
     ch,
@@ -74,9 +75,9 @@ class TestLightshow(unittest.TestCase):
     def test_algebraic_operators_and_fixture_channels(self) -> None:
         rig = Rig([PARS], dry_run=True)
 
-        clip = (
-            (Hold(Color.RED, duration=1.0).on(0, 2) | Hold(Color.BLUE, duration=1.0).on(1, 3))
-            >> (Hold(Color.GREEN, duration=1.0) | Strobe(rate=0.5, duration=1.0))
+        clip = Sequence(
+            Hold(Color.RED, duration=1.0).on(0, 2) | Hold(Color.BLUE, duration=1.0).on(1, 3),
+            Hold(Color.GREEN, duration=1.0) | Strobe(rate=0.5, duration=1.0),
         )
         self.assertEqual(clip.duration, 2.0)
 
@@ -210,8 +211,11 @@ class TestLightshow(unittest.TestCase):
         dmx_htp = rig.render_dmx(s_all ^ s_par_low_r, t=0.5)
         self.assertEqual(dmx_htp[0:3], [102, 0, 204])
 
-        # 4. Sequential composition of multi-group scenes (`scene1 >> scene2`)
-        seq_scene = (s_all | STROBE_RGB(dim(0.5, Hold(Color.GREEN, duration=1.0)))) >> s_par
+        # 4. Sequential composition of multi-group scenes (`Sequence([s1, s2])`)
+        seq_scene = Sequence(
+            s_all | STROBE_RGB(dim(0.5, Hold(Color.GREEN, duration=1.0))),
+            s_par,
+        )
         self.assertEqual(seq_scene.duration, 2.0)
         self.assertEqual(rig.render_dmx(seq_scene, t=0.5)[31:34], [0, 128, 0])
         self.assertEqual(rig.render_dmx(seq_scene, t=1.5)[0:3], [128, 0, 153])
@@ -737,11 +741,11 @@ class TestLightshow(unittest.TestCase):
         self.assertAlmostEqual(seq_scene_args.duration, 2.0)
         self.assertAlmostEqual(seq_scene_list.duration, 2.0)
 
-        # 5. Parity between >> and list
-        scene_op = PARS(c1 >> c2 >> c3)
-        self.assertEqual(scene_list.eval_canvas(0.5).to_dmx_list(), scene_op.eval_canvas(0.5).to_dmx_list())
-        self.assertEqual(scene_list.eval_canvas(1.5).to_dmx_list(), scene_op.eval_canvas(1.5).to_dmx_list())
-        self.assertEqual(scene_list.eval_canvas(2.5).to_dmx_list(), scene_op.eval_canvas(2.5).to_dmx_list())
+        # 5. Verify >> operator is removed and raises TypeError
+        with self.assertRaises(TypeError):
+            _ = c1 >> c2  # type: ignore[operator]
+        with self.assertRaises(TypeError):
+            _ = s1 >> s2  # type: ignore[operator]
 
 
 if __name__ == "__main__":

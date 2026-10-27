@@ -1,7 +1,7 @@
 """Algebraic composable animation clips using Python operator overloading.
 
-Core operators on `Clip`:
-  - `clip1 >> clip2`       : Sequence (`clip1` followed by `clip2`)
+Core composition on `Clip`:
+  - `Sequence([clip1, clip2])` : Sequence (`clip1` followed by `clip2`)
   - `clip1 | clip2`        : Layer / Override (`clip2` overrides non-None channels of `clip1`)
   - `clip1 + clip2`        : Additive blend (`clip1` and `clip2` colors/channels added together)
   - `clip * n`             : Repeat `n` times (or `clip * inf` for infinite loop)
@@ -67,10 +67,6 @@ class Clip:
     # Algebraic Operators
     # -------------------------------------------------------------------------
 
-    def __rshift__(self, other: Clip) -> SequenceClip:
-        """`a >> b`: Play `a` then `b` sequentially."""
-        return SequenceClip(self, other)
-
     def __or__(self, other: Clip) -> LayerClip:
         """`a | b`: Play `a` and `b` in parallel; `b`'s non-None attributes override `a`."""
         return LayerClip(self, other, mode="override")
@@ -125,7 +121,7 @@ class Clip:
         return RepeatClip(self, count=count)
 
     def pingpong(self) -> SequenceClip:
-        """Play forward then backward (`clip >> ~clip`)."""
+        """Play forward then backward (`Sequence([clip, ~clip])`)."""
         return SequenceClip(self, ReverseClip(self))
 
     def phase(self, offset_per_fixture: float, wrap: bool = True) -> PhaseClip:
@@ -291,7 +287,7 @@ def ch(name: str, clip_or_val: Union[Clip, float], *, duration: float = inf) -> 
 
 
 class SequenceClip(Clip):
-    """Sequential composition (`a >> b >> c` or `Sequence([a, b, c])`)."""
+    """Sequential composition (`Sequence([a, b, c])` or `[a, b, c]`)."""
 
     def __init__(self, *clips: Union[Clip, SeqType[Clip]]) -> None:
         raw: list[Clip] = []

@@ -145,12 +145,6 @@ class Color:
             return Hold(self) | other
         return NotImplemented
 
-    def __rshift__(self, other):
-        from .clips import Clip, Hold
-        if isinstance(other, Clip):
-            return Hold(self) >> other
-        return NotImplemented
-
     def __and__(self, other):
         from .clips import Clip, Hold
         if isinstance(other, Clip):

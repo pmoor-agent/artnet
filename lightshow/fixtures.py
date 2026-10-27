@@ -9,7 +9,7 @@ composable `Scene` supporting the same operators as `Clip`:
   - `scene1 | scene2`  : Override (LTP) on overlapping DMX channels
   - `scene1 + scene2`  : Additive blend (`min(1.0, a + b)`) on overlapping DMX channels
   - `scene1 ^ scene2`  : HTP (`max(a, b)`) on overlapping DMX channels
-  - `scene1 >> scene2` : Play `scene1` followed by `scene2`
+  - `Sequence([s1, s2])` : Play `s1` followed by `s2`
   - `scene * n`        : Loop `scene` `n` times (or `* inf`)
   - `scene @ duration` : Time-stretch `scene` to `duration` seconds
   - `~scene`           : Time-reverse a finite `scene`
@@ -480,10 +480,6 @@ class Scene:
         """`scene1 ^ scene2`: Parallel HTP (`max(a, b)`) on overlapping DMX channels."""
         return LayerScene(self, other, mode="htp")
 
-    def __rshift__(self, other: Scene) -> SequenceScene:
-        """`scene1 >> scene2`: Play `scene1` then `scene2` sequentially."""
-        return SequenceScene(self, other)
-
     def __mul__(self, count: Union[int, float]) -> RepeatScene:
         """`scene * n`: Loop `scene` `n` times (or `scene * inf`)."""
         if count == inf or count == float("inf"):
@@ -697,7 +693,7 @@ class LayerScene(Scene):
 
 
 class SequenceScene(Scene):
-    """Sequential composition of `Scene`s (`scene1 >> scene2` or `Sequence([s1, s2])`)."""
+    """Sequential composition of `Scene`s (`Sequence([s1, s2])` or `[s1, s2]`)."""
 
     def __init__(self, *scenes: Union[Scene, Sequence[Scene]]) -> None:
         raw: list[Scene] = []

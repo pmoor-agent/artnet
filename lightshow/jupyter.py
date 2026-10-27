@@ -21,7 +21,7 @@ import math
 import sys
 import threading
 import time
-from typing import Optional, Sequence, Union
+from typing import Optional, Union
 
 # 1. Re-export all core lightshow symbols
 import lightshow

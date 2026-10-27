@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import argparse
-from lightshow import Color, Ease, Fade, Hold, inf
+from lightshow import Color, Ease, Fade, Hold, Sequence, inf
 from my_rig import PARS, STROBE_BAR, STROBE_MASTER, create_rig
 
 
@@ -22,10 +22,10 @@ def build_strobe_ramp_show(include_rgb: bool = False):
 
     # Strobe speed: 0.0 -> 1.0 linearly over 10s, then 1.0 -> 0.0 linearly over 10s
     # DMX Ch 52 maps 0.0 to 0 (off/solid on), and (0.0..1.0] to 9..255 (slowest to fastest strobe)
-    strobe_ramp = (
-        Fade(0.0, 1.0, duration=10.0, ease=Ease.linear)
-        >> Fade(1.0, 0.0, duration=10.0, ease=Ease.linear)
-    ) * inf
+    strobe_ramp = Sequence([
+        Fade(0.0, 1.0, duration=10.0, ease=Ease.linear),
+        Fade(1.0, 0.0, duration=10.0, ease=Ease.linear),
+    ]) * inf
 
     # PARs stay off so focus is 100% on the strobe bar
     pars_off = Hold(Color.BLACK, duration=20.0) * inf

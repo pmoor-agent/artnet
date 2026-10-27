@@ -5,8 +5,8 @@
 Traditional lighting control often suffers from imperative spaghetti code: manual byte arrays, hardware tick loops, and scattered timing logic. `lightshow` replaces this with a **declarative, functional timeline**:
 
 - **Continuous Functional Time**: Animations and cues are mathematical functions $f(t) \to \text{State}$, evaluated cleanly at any frame rate (30 Hz, 40 Hz, 60 Hz).
-- **Algebraic Composition**: Combine lighting patterns using standard Python operators:
-  - `>>` for time sequencing (`A >> B >> C`)
+- **Algebraic Composition**: Combine lighting patterns using standard Python idioms and operators:
+  - `[A, B, C]` / `Sequence([A, B, C])` for chronological time sequencing
   - `|` for concurrent layering (Last-Takes-Precedence / LTP override)
   - `^` for additive optical blending
   - `* n` for repetition and infinite looping (`* inf` or `.loop()`)
@@ -43,7 +43,7 @@ Boundary-aware linear chase with trailing decay and background ambient wash:
 ## Quickstart
 
 ```python
-from lightshow import Color, Fade, Gradient, Hold, Pulse, Rainbow, Strobe, Wait
+from lightshow import Color, Fade, Gradient, Hold, Pulse, Rainbow, Sequence, Strobe, Wait
 from lightshow.profiles import EurolitePartySpot, Stage
 
 # 1. Define your physical fixtures (e.g. 8 RGBW PARs)
@@ -58,13 +58,13 @@ show = PARS(
     | (Pulse(1.0, low=0.25, high=1.0, duration=0.6, channel="dimmer") * 5)
     
     # Layer 3: Strobe burst on bookends and center at 2.4s
-    | (
-        Wait(2.4)
-        >> (
+    | Sequence([
+        Wait(2.4),
+        (
             Hold(Color.RED, strobe=0.9, duration=0.6).on(0, 7)
             | Hold(Color.WHITE, strobe=0.9, duration=0.6).on(3, 4)
-        )
-    )
+        ),
+    ])
 )
 
 # 3. Render 2D SVG visualizer or inspect in Jupyter

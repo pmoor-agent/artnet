@@ -15,6 +15,7 @@ from lightshow import (
     Hold,
     Pulse,
     Rainbow,
+    Sequence,
     Strobe,
     Wait,
     dim,
@@ -27,18 +28,18 @@ def build_demo_show():
     # -------------------------------------------------------------------------
     # Section 1 (5.0s): Warm-up intro + center-outward symmetric pulse
     # -------------------------------------------------------------------------
-    pars_intro = (
-        Fade(Color.BLACK, Color.WARM_WHITE, duration=2.0)
-        >> Pulse(Color.AMBER, duration=1.5).mirror() * 2
-    )
-    w8_intro = (
-        Blackout(duration=2.0)
-        >> Chase(Color.WHITE, step_duration=0.1875, tail=1.5).mirror() * 4
-    )
-    rgb8_intro = (
-        Fade(Color.BLACK, Color.AMBER, duration=2.0)
-        >> Pulse(Color.ORANGE, duration=1.5).mirror().spread(0.6) * 2
-    )
+    pars_intro = Sequence([
+        Fade(Color.BLACK, Color.WARM_WHITE, duration=2.0),
+        Pulse(Color.AMBER, duration=1.5).mirror() * 2,
+    ])
+    w8_intro = Sequence([
+        Blackout(duration=2.0),
+        Chase(Color.WHITE, step_duration=0.1875, tail=1.5).mirror() * 4,
+    ])
+    rgb8_intro = Sequence([
+        Fade(Color.BLACK, Color.AMBER, duration=2.0),
+        Pulse(Color.ORANGE, duration=1.5).mirror().spread(0.6) * 2,
+    ])
 
     # -------------------------------------------------------------------------
     # Section 2 (8.0s): Spatial rainbow wave across all fixtures
@@ -71,23 +72,23 @@ def build_demo_show():
         Pulse(Color.RED, duration=1.0).on(0, 2)
         | Pulse(Color.BLUE, duration=1.0).on(1, 3)
     ) * 4
-    strobe_hit = (Wait(1.6) >> Strobe(rate=0.75, duration=0.4, color=Color.WHITE)) * 2
+    strobe_hit = Sequence([Wait(1.6), Strobe(rate=0.75, duration=0.4, color=Color.WHITE)]) * 2
     pars_duel = duel_colors | strobe_hit
 
-    w8_rapid_flash = (
-        Hold(Color.WHITE, duration=0.075).on(0, 2, 4, 6)
-        >> Hold(Color.WHITE, duration=0.075).on(1, 3, 5, 7)
-    ) * 3
-    w8_duel = (Blackout(duration=1.55) >> w8_rapid_flash) * 2
+    w8_rapid_flash = Sequence([
+        Hold(Color.WHITE, duration=0.075).on(0, 2, 4, 6),
+        Hold(Color.WHITE, duration=0.075).on(1, 3, 5, 7),
+    ]) * 3
+    w8_duel = Sequence([Blackout(duration=1.55), w8_rapid_flash]) * 2
 
     rgb8_duel = (
         Pulse(Color.RED, duration=1.0).on(0, 2, 4, 6)
         | Pulse(Color.BLUE, duration=1.0).on(1, 3, 5, 7)
     ) * 4
 
-    pars_anim = (pars_intro >> pars_rainbow >> pars_chase >> pars_duel) * inf
-    w8_anim = (w8_intro >> w8_rainbow >> w8_chase >> w8_duel) * inf
-    rgb8_anim = (rgb8_intro >> rgb8_rainbow >> rgb8_chase >> rgb8_duel) * inf
+    pars_anim = Sequence([pars_intro, pars_rainbow, pars_chase, pars_duel]) * inf
+    w8_anim = Sequence([w8_intro, w8_rainbow, w8_chase, w8_duel]) * inf
+    rgb8_anim = Sequence([rgb8_intro, rgb8_rainbow, rgb8_chase, rgb8_duel]) * inf
 
     # Bind each clip to its FixtureGroup and compose them with `|`!
     return (

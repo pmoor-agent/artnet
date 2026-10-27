@@ -5,7 +5,7 @@
 Traditional lighting programming often suffers from imperative spaghetti code: manual byte arrays, hardware tick loops, and scattered timing variables. `lightshow` replaces this with a **declarative, functional timeline**:
 
 1. **Continuous Time**: Every clip and scene is mathematically modeled as a continuous function $f(t) \to \text{State}$, evaluated cleanly at any frame rate (30 Hz, 40 Hz, 60 Hz).
-2. **Algebraic Composition**: Complex lighting shows are constructed by composing clips and scenes using standard Python operators (`>>` for sequencing, `|` for layering, `*` for repetition, `@` for time scaling, and `~` for inversion).
+2. **Algebraic Composition**: Complex lighting shows are constructed by composing clips and scenes using standard Python list sequencing (`[A, B, C]`), layering (`|`), repetition (`*`), time scaling (`@`), and inversion (`~`).
 3. **Decoupled Hardware**: Physical DMX channels are abstracted into reusable fixture profiles (`EurolitePartySpot`, `EuroliteBCL40Bar`), while visualizer engines render authentic 2D stage faces and timelines directly in Python and Jupyter notebooks.
 
 ---
@@ -94,14 +94,14 @@ A `Clip` represents a time-varying light pattern independent of physical hardwar
 
 ### Example 1: Basic Transitions (`Fade` $\rightarrow$ `Pulse` $\rightarrow$ `Hold`)
 
-Chaining clips sequentially using the `>>` operator:
+Sequencing clips chronologically using a Python list:
 
 ```python
-scene = PARS(
-    Fade(Color.BLUE, Color.MAGENTA, duration=1.0)
-    >> Pulse(Color.CYAN, duration=1.0)
-    >> Hold(Color.AMBER, duration=0.8)
-)
+scene = PARS([
+    Fade(Color.BLUE, Color.MAGENTA, duration=1.0),
+    Pulse(Color.CYAN, duration=1.0),
+    Hold(Color.AMBER, duration=0.8),
+])
 ```
 
 ![Basic Clips: Fade, Pulse, Hold](./images/01_basics_fade_pulse.svg)
@@ -112,9 +112,9 @@ scene = PARS(
 
 `lightshow` uses Python operator overloading to provide a clean algebra for time manipulation:
 
-| Operator | Method / Class | Meaning | Example |
+| Operator / Syntax | Method / Class | Meaning | Example |
 | :--- | :--- | :--- | :--- |
-| `>>` | `SequenceClip` / `SequenceScene` | **Sequence (Then)**: Play A, then play B | `A >> B >> C` |
+| `[A, B, C]` / `Sequence(...)` | `SequenceClip` / `SequenceScene` | **Sequence (Then)**: Play A, then B, then C | `PARS([A, B, C])` or `Sequence([A, B])` |
 | `* n` | `RepeatClip` / `RepeatScene` | **Repeat (Loop)**: Repeat pattern $n$ times | `Pulse(Color.RED) * 4` |
 | `[start:stop]` | `SliceClip` / `SliceScene` | **Time Slice (Cut)**: Extract sub-range $[t_{\text{start}}, t_{\text{stop}}]$ | `clip[0.3:1.2]` |
 | `@ dur` | `TimeScaleClip` / `TimeScaleScene` | **Time Scale (Stretch/Compress)**: Force duration to `dur` | `Rainbow() @ 10.0` |
@@ -142,7 +142,7 @@ cut_scene = my_scene[0.3:1.2] * inf
 
 Clips can be repeated finite times or indefinitely:
 ```python
-pattern = Pulse(Color.CYAN, duration=0.5) >> Wait(0.5)
+pattern = Sequence([Pulse(Color.CYAN, duration=0.5), Wait(0.5)])
 
 # 4 repetitions (total 4.0s)
 four_times = pattern * 4
@@ -371,7 +371,11 @@ base_wash = Gradient(
 flicker_wash = base_wash.flicker(depth=0.55, speed=11.0, low=0.25).jitter_hue(amount=0.07, speed=3.5)
 
 # 3. Occasional eerie cold lightning burst at t=3.0s
-lightning = Wait(3.0) >> (Hold(Color.WHITE, strobe=0.9, duration=0.25).on(2, 3, 4, 5)) >> Wait(0.75)
+lightning = Sequence([
+    Wait(3.0),
+    Hold(Color.WHITE, strobe=0.9, duration=0.25).on(2, 3, 4, 5),
+    Wait(0.75),
+])
 
 halloween_show = PARS(flicker_wash) + PARS(lightning)
 ```
@@ -396,13 +400,13 @@ mini_show = PARS(
     | (Pulse(1.0, low=0.25, high=1.0, duration=0.6, channel="dimmer") * 5)
     
     # Layer 3: Strobe hit at 2.4 seconds
-    | (
-        Wait(2.4)
-        >> (
+    | Sequence([
+        Wait(2.4),
+        (
             Hold(Color.RED, strobe=0.9, duration=0.6).on(0, 7)      # Bookends (Red strobe)
             | Hold(Color.WHITE, strobe=0.9, duration=0.6).on(3, 4)  # Center (White strobe)
-        )
-    )
+        ),
+    ])
 )
 ```
 
@@ -455,7 +459,7 @@ stop_stream()
 
 | Expression | Name | Description |
 | :--- | :--- | :--- |
-| `A >> B` | Sequence | Play `A`, followed immediately by `B`. |
+| `[A, B, C]` / `Sequence(...)` | Sequence | Play `A`, then `B`, then `C` in chronological order. |
 | `A \| B` | Layer / Override | Play `A` and `B` simultaneously (LTP override / relative offsets). |
 | `A + B` | Additive Blend | Layer with additive RGB photon mixing. |
 | `A & B` | Multiply / Mask | Scale `A` brightness or channels by scalar envelope `B`. |
@@ -493,7 +497,7 @@ stop_stream()
 | `clip.on(*indices)` | Restrict animation to specific 0-based fixture indices. |
 | `clip.spread()` | Distribute phase across all fixtures in the group evenly. |
 | `clip.stagger(delay)` | Shift start time of each successive fixture by `delay` seconds. |
-| `clip.pingpong()` | Play clip forward, then immediately backward (`clip >> ~clip`). |
+| `clip.pingpong()` | Play clip forward, then immediately backward (`Sequence([clip, ~clip])`). |
 | `clip.flicker(depth, speed)` | Modulate with organic flame/candle flicker. Available on `Clip` and `Scene`. |
 | `clip.jitter_hue(amount, speed)` | Jitter hue smoothly in HSV space with organic noise. Available on `Clip` and `Scene`. |
 | `clip.shift_hsv(dh, ds, dv)` | Shift hue, saturation, and value relative to base color. Available on `Clip` and `Scene`. |

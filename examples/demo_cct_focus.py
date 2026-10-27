@@ -20,6 +20,7 @@ from lightshow import (
     Color,
     FadeCCT,
     Hold,
+    Sequence,
     inf,
 )
 from my_rig import (
@@ -35,12 +36,12 @@ def build_cct_focus_show():
     # Step 1 (8.0s): Segment position check (Left -> Right in distinct colors)
     # -------------------------------------------------------------------------
     seg_step = 2.0
-    step1 = (
-        Hold(Color.GREEN, ww=0.0, cw=0.0, duration=seg_step).on(0)
-        >> Hold(Color.CYAN, ww=0.0, cw=0.0, duration=seg_step).on(1)
-        >> Hold(Color.BLUE, ww=0.0, cw=0.0, duration=seg_step).on(2)
-        >> Hold(Color.MAGENTA, ww=0.0, cw=0.0, duration=seg_step).on(3)
-    )
+    step1 = Sequence([
+        Hold(Color.GREEN, ww=0.0, cw=0.0, duration=seg_step).on(0),
+        Hold(Color.CYAN, ww=0.0, cw=0.0, duration=seg_step).on(1),
+        Hold(Color.BLUE, ww=0.0, cw=0.0, duration=seg_step).on(2),
+        Hold(Color.MAGENTA, ww=0.0, cw=0.0, duration=seg_step).on(3),
+    ])
     pars_step1 = Hold(Color.BLACK, duration=8.0)
 
     # -------------------------------------------------------------------------
@@ -58,7 +59,7 @@ def build_cct_focus_show():
     # -------------------------------------------------------------------------
     # Step 4 (10.0s): Smooth CCT Sweep (3200K -> 6600K -> 3200K)
     # -------------------------------------------------------------------------
-    step4 = FadeCCT(3200, 6600, duration=5.0) >> FadeCCT(6600, 3200, duration=5.0)
+    step4 = Sequence([FadeCCT(3200, 6600, duration=5.0), FadeCCT(6600, 3200, duration=5.0)])
     pars_step4 = Hold(Color.BLACK, duration=10.0)
 
     # -------------------------------------------------------------------------
@@ -71,19 +72,19 @@ def build_cct_focus_show():
     # Step 6 (6.0s): Channel 21 Hardware Strobe test
     # -------------------------------------------------------------------------
     # 3s solid Warm White, then 3s solid Cold White
-    step6 = Hold(Color.BLACK, ww=1.0, cw=0.0, duration=3.0) >> Hold(Color.BLACK, ww=0.0, cw=1.0, duration=3.0)
+    step6 = Sequence([Hold(Color.BLACK, ww=1.0, cw=0.0, duration=3.0), Hold(Color.BLACK, ww=0.0, cw=1.0, duration=3.0)])
     pars_step6 = Hold(Color.BLACK, duration=6.0)
 
     # Build sequence for STROBE_BAR (channels 32..51)
-    bar_anim = (step1 >> step2 >> step3 >> step4 >> step5 >> step6) * inf
-    pars_anim = (pars_step1 >> pars_step2 >> pars_step3 >> pars_step4 >> pars_step5 >> pars_step6) * inf
+    bar_anim = Sequence([step1, step2, step3, step4, step5, step6]) * inf
+    pars_anim = Sequence([pars_step1, pars_step2, pars_step3, pars_step4, pars_step5, pars_step6]) * inf
 
     # Build sequence for STROBE_MASTER (channel 52): 33s off, 3s slow (25%), 3s fast (75%)
-    strobe_master_anim = (
-        Blackout(duration=33.0)
-        >> Hold(0.25, duration=3.0)
-        >> Hold(0.75, duration=3.0)
-    ) * inf
+    strobe_master_anim = Sequence([
+        Blackout(duration=33.0),
+        Hold(0.25, duration=3.0),
+        Hold(0.75, duration=3.0),
+    ]) * inf
 
     return (
         PARS(pars_anim)
