@@ -20,7 +20,7 @@ from math import inf
 from typing import Callable, Iterable, Optional, Sequence as SeqType, Union
 
 from .state import Color, Patch
-from .tempo import MusicalDuration, Seconds
+from .tempo import AbsoluteDuration, MusicalDuration, Seconds, abs
 
 
 class Ease:
@@ -108,6 +108,23 @@ class Clip:
 
     def __rmul__(self, count: Union[int, float]) -> Clip:
         return self.__mul__(count)
+
+    @property
+    def is_absolute(self) -> bool:
+        """Whether this clip has absolute duration and resists scaling in sequences."""
+        return False
+
+    def __abs__(self) -> AbsoluteClip:
+        """`abs(clip)`: Mark this clip as absolute so it resists time-stretching in sequences."""
+        return AbsoluteClip(self)
+
+    def abs(self) -> AbsoluteClip:
+        """Fluent alias for `abs(clip)`."""
+        return self.__abs__()
+
+    def absolute(self) -> AbsoluteClip:
+        """Fluent alias for `abs(clip)`."""
+        return self.__abs__()
 
     def __matmul__(self, target_duration: Union[float, Any]) -> Clip:
         """`clip @ duration`: Stretch or compress a finite clip to `target_duration` seconds or musical beats."""
@@ -349,6 +366,44 @@ class SequenceClip(Clip):
             return self
         return SequenceClip(*new_clips)
 
+    def with_duration(self, target_duration: Union[float, Any]) -> SequenceClip:
+        abs_clips = [c for c in self.clips if c.is_absolute]
+        scalable_clips = [c for c in self.clips if not c.is_absolute]
+
+        if not abs_clips or not scalable_clips:
+            total_dur = self.duration
+            if total_dur <= 0:
+                return self
+            scale = target_duration / total_dur
+            return SequenceClip(*(c.with_duration(c.duration * scale) for c in self.clips))
+
+        abs_dur = sum(c.duration for c in abs_clips)
+        scalable_dur = sum(c.duration for c in scalable_clips)
+        target_scalable = target_duration - abs_dur
+
+        if target_scalable <= 0 or scalable_dur <= 0:
+            total_dur = self.duration
+            scale = target_duration / total_dur if total_dur > 0 else 1.0
+            return SequenceClip(*(c.with_duration(c.duration * scale) for c in self.clips))
+
+        if len(scalable_clips) == 1:
+            new_clips: list[Clip] = []
+            for c in self.clips:
+                if c.is_absolute:
+                    new_clips.append(c)
+                else:
+                    new_clips.append(c.with_duration(target_scalable))
+            return SequenceClip(*new_clips)
+
+        scale = target_scalable / scalable_dur
+        new_clips = []
+        for c in self.clips:
+            if c.is_absolute:
+                new_clips.append(c)
+            else:
+                new_clips.append(c.with_duration(c.duration * scale))
+        return SequenceClip(*new_clips)
+
 
 class LayerClip(Clip):
     """Parallel composition (`a | b` for override, `a + b` for additive, `a & b` for multiply)."""
@@ -446,6 +501,43 @@ class TimeScaleClip(Clip):
         if new_child is self.child:
             return self
         return TimeScaleClip(new_child, self._target_duration)
+
+
+class AbsoluteClip(Clip):
+    """Wraps a Clip to lock its duration as absolute (resisting time scaling in sequences)."""
+
+    def __init__(self, child: Clip) -> None:
+        self.child = child
+
+    @property
+    def is_absolute(self) -> bool:
+        return True
+
+    @property
+    def duration(self) -> float:
+        return self.child.duration
+
+    @property
+    def duration_beats(self) -> Optional[float]:
+        return self.child.duration_beats
+
+    def eval(self, t: float, fixture: int = 0, total_fixtures: int = 4) -> Patch:
+        return self.child.eval(t, fixture, total_fixtures)
+
+    def with_fixture_count(self, count: int) -> AbsoluteClip:
+        new_child = self.child.with_fixture_count(count)
+        if new_child is self.child:
+            return self
+        return AbsoluteClip(new_child)
+
+    def with_duration(self, target_duration: Union[float, Any]) -> AbsoluteClip:
+        return AbsoluteClip(self.child.with_duration(target_duration))
+
+    def __abs__(self) -> AbsoluteClip:
+        return self
+
+    def __repr__(self) -> str:
+        return f"abs({self.child!r})"
 
 
 class ReverseClip(Clip):
@@ -1005,9 +1097,12 @@ class Pulse(Clip):
 
     def with_duration(self, target_duration: Union[float, Any]) -> Clip:
         has_unscaled = (
-            isinstance(self.lead, Seconds)
-            or isinstance(self.tail, Seconds)
-            or isinstance(self.hold, Seconds)
+            getattr(self.lead, "is_absolute", False)
+            or getattr(self.tail, "is_absolute", False)
+            or getattr(self.hold, "is_absolute", False)
+            or isinstance(self.lead, (AbsoluteDuration, Seconds))
+            or isinstance(self.tail, (AbsoluteDuration, Seconds))
+            or isinstance(self.hold, (AbsoluteDuration, Seconds))
         )
         if not has_unscaled:
             return TimeScaleClip(self, target_duration)

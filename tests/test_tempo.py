@@ -5,6 +5,7 @@ import time
 import unittest
 
 from lightshow import (
+    Abs,
     Chase,
     Color,
     Fade,
@@ -17,8 +18,11 @@ from lightshow import (
     RGB,
     Rig,
     Seconds,
+    Seq,
     Sequence,
     Tempo,
+    abs,
+    absolute,
     bars,
     beats,
     get_tempo,
@@ -348,9 +352,11 @@ class TestClipTempoIntegration(unittest.TestCase):
         s = seconds(1.5)
         self.assertEqual(float(s), 1.5)
         self.assertEqual(int(s), 1)
-        self.assertEqual(repr(s), "Seconds(1.5s)")
+        self.assertEqual(repr(s), "abs(1.5s)")
         self.assertEqual(f"{s:.1f}", "1.5")
         self.assertEqual(sec(2.0), Seconds(2.0))
+        self.assertEqual(abs(1.5), s)
+        self.assertEqual(Abs(1.5), s)
 
         # Arithmetic
         self.assertEqual(s + 0.5, Seconds(2.0))
@@ -368,6 +374,63 @@ class TestClipTempoIntegration(unittest.TestCase):
         self.assertTrue(s < 2.0)
         self.assertEqual(s, 1.5)
         self.assertEqual(s, Seconds(1.5))
+
+    def test_sequence_with_abs_clips_scaling_only_middle_section(self) -> None:
+        """Verify Sequence([abs(chase), chase, abs(chase)]) @ 4.0 only scales the middle section."""
+        c1 = Chase(Color.RED, step_duration=0.25, num_steps=4)    # 1.0s
+        c2 = Chase(Color.GREEN, step_duration=0.25, num_steps=4)  # 1.0s
+        c3 = Chase(Color.BLUE, step_duration=0.25, num_steps=4)   # 1.0s
+
+        # 1. Sequence([abs(c1), c2, abs(c3)]) @ 4.0
+        # Total initial = 3.0s (1.0 + 1.0 + 1.0)
+        # Scaled to 4.0s: c1 stays 1.0s, c3 stays 1.0s, c2 expands to 2.0s!
+        seq = Sequence([abs(c1), c2, abs(c3)]) @ 4.0
+        self.assertAlmostEqual(seq.duration, 4.0)
+
+        # First 1.0s is c1 (Red)
+        self.assertEqual(seq.eval(0.1, fixture=0, total_fixtures=4).color, Color.RED)
+        self.assertEqual(seq.eval(0.9, fixture=3, total_fixtures=4).color, Color.RED)
+
+        # From 1.0s to 3.0s (duration 2.0s) is c2 (Green)
+        # c2 had step 0.25s, now stretched to step 0.5s!
+        # At t=1.1s (0.1s into c2): fixture 0 is active
+        self.assertEqual(seq.eval(1.1, fixture=0, total_fixtures=4).color, Color.GREEN)
+        # At t=1.6s (0.6s into c2): fixture 1 is active (step 0.5..1.0s)
+        self.assertEqual(seq.eval(1.6, fixture=1, total_fixtures=4).color, Color.GREEN)
+
+        # From 3.0s to 4.0s (duration 1.0s) is c3 (Blue)
+        # c3 remains unscaled with step 0.25s!
+        # At t=3.1s (0.1s into c3): fixture 0 is active
+        self.assertEqual(seq.eval(3.1, fixture=0, total_fixtures=4).color, Color.BLUE)
+
+        # 2. Test bracket syntax: Seq[abs(c1), c2, abs(c3)] @ 6.0
+        # c2 expands to 4.0s (from 1.0s to 5.0s)
+        seq_bracket = Seq[abs(c1), c2, abs(c3)] @ 6.0
+        self.assertAlmostEqual(seq_bracket.duration, 6.0)
+        # At t=2.0s (1.0s into c2 of 4.0s): step_duration is 1.0s, fixture 1 is active
+        self.assertEqual(seq_bracket.eval(2.1, fixture=1, total_fixtures=4).color, Color.GREEN)
+        # At t=5.1s (into c3): fixture 0 of c3 is active
+        self.assertEqual(seq_bracket.eval(5.1, fixture=0, total_fixtures=4).color, Color.BLUE)
+
+        # 3. Test multi-fixture scene: PARS([abs(c1), c2, abs(c3)]) @ 4.0
+        scene = self.pars([abs(c1), c2, abs(c3)]) @ 4.0
+        self.assertAlmostEqual(scene.duration, 4.0)
+
+    def test_abs_tail_in_chase(self) -> None:
+        """Verify tail=abs(1.0) sets an absolute 1-second decay tail invariant to BPM and scaling."""
+        chase = Chase(Color.WHITE, step_duration=self.t.beats(1.0), tail=abs(1.0), num_steps=4, wrap=False)
+
+        # At 120 BPM: step_dt = 0.5s.
+        self.assertAlmostEqual(chase.eval(0.00, fixture=0, total_fixtures=4).color.r, 1.0, places=3)
+        self.assertAlmostEqual(chase.eval(0.50, fixture=0, total_fixtures=4).color.r, 0.5, places=3)
+        self.assertAlmostEqual(chase.eval(1.00, fixture=0, total_fixtures=4).color.r, 0.0, places=3)
+
+        # Stretched via @ 8.0: step_dt becomes 2.0s.
+        # But tail was defined as abs(1.0), so decay time is STILL 1.0s!
+        stretched = chase @ 8.0
+        self.assertAlmostEqual(stretched.eval(0.00, fixture=0, total_fixtures=4).color.r, 1.0, places=3)
+        self.assertAlmostEqual(stretched.eval(0.50, fixture=0, total_fixtures=4).color.r, 0.5, places=3)
+        self.assertAlmostEqual(stretched.eval(1.00, fixture=0, total_fixtures=4).color.r, 0.0, places=3)
 
 
 class TestLiveStreamTempoSync(unittest.TestCase):

@@ -509,6 +509,23 @@ class Scene:
     def __rmul__(self, count: Union[int, float]) -> RepeatScene:
         return self.__mul__(count)
 
+    @property
+    def is_absolute(self) -> bool:
+        """Whether this scene has absolute duration and resists scaling in sequences."""
+        return False
+
+    def __abs__(self) -> AbsoluteScene:
+        """`abs(scene)`: Mark this scene as absolute so it resists time-stretching in sequences."""
+        return AbsoluteScene(self)
+
+    def abs(self) -> AbsoluteScene:
+        """Fluent alias for `abs(scene)`."""
+        return self.__abs__()
+
+    def absolute(self) -> AbsoluteScene:
+        """Fluent alias for `abs(scene)`."""
+        return self.__abs__()
+
     def __matmul__(self, target_duration: Union[float, Any]) -> Scene:
         """`scene @ duration`: Stretch or compress a finite scene to `target_duration` seconds or musical beats."""
         return self.with_duration(target_duration)
@@ -663,6 +680,19 @@ class BoundScene(Scene):
             ),
         )
 
+    @property
+    def is_absolute(self) -> bool:
+        return self.clip.is_absolute
+
+    def __abs__(self) -> BoundScene:
+        return BoundScene(self.group, abs(self.clip))
+
+    def abs(self) -> BoundScene:
+        return self.__abs__()
+
+    def absolute(self) -> BoundScene:
+        return self.__abs__()
+
     def with_duration(self, target_duration: Union[float, Any]) -> BoundScene:
         return BoundScene(self.group, self.clip.with_duration(target_duration))
 
@@ -778,6 +808,44 @@ class SequenceScene(Scene):
     def shift_hsv(self, dh: Union[float, Clip] = 0.0, ds: float = 0.0, dv: float = 0.0, **kwargs) -> Scene:
         return SequenceScene(*(s.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs) for s in self.scenes))
 
+    def with_duration(self, target_duration: Union[float, Any]) -> SequenceScene:
+        abs_scenes = [s for s in self.scenes if s.is_absolute]
+        scalable_scenes = [s for s in self.scenes if not s.is_absolute]
+
+        if not abs_scenes or not scalable_scenes:
+            total_dur = self.duration
+            if total_dur <= 0:
+                return self
+            scale = target_duration / total_dur
+            return SequenceScene(*(s.with_duration(s.duration * scale) for s in self.scenes))
+
+        abs_dur = sum(s.duration for s in abs_scenes)
+        scalable_dur = sum(s.duration for s in scalable_scenes)
+        target_scalable = target_duration - abs_dur
+
+        if target_scalable <= 0 or scalable_dur <= 0:
+            total_dur = self.duration
+            scale = target_duration / total_dur if total_dur > 0 else 1.0
+            return SequenceScene(*(s.with_duration(s.duration * scale) for s in self.scenes))
+
+        if len(scalable_scenes) == 1:
+            new_scenes: list[Scene] = []
+            for s in self.scenes:
+                if s.is_absolute:
+                    new_scenes.append(s)
+                else:
+                    new_scenes.append(s.with_duration(target_scalable))
+            return SequenceScene(*new_scenes)
+
+        scale = target_scalable / scalable_dur
+        new_scenes = []
+        for s in self.scenes:
+            if s.is_absolute:
+                new_scenes.append(s)
+            else:
+                new_scenes.append(s.with_duration(s.duration * scale))
+        return SequenceScene(*new_scenes)
+
 
 class RepeatScene(Scene):
     """Loops a finite `Scene` `count` times (`scene * n` or `scene * inf`)."""
@@ -853,6 +921,49 @@ class TimeScaleScene(Scene):
 
     def shift_hsv(self, dh: Union[float, Clip] = 0.0, ds: float = 0.0, dv: float = 0.0, **kwargs) -> Scene:
         return TimeScaleScene(self.child.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs), target_duration=self._target_duration)
+
+
+class AbsoluteScene(Scene):
+    """Wraps a Scene to lock its duration as absolute (resisting time scaling in sequences)."""
+
+    def __init__(self, child: Scene) -> None:
+        self.child = child
+
+    @property
+    def is_absolute(self) -> bool:
+        return True
+
+    @property
+    def duration(self) -> float:
+        return self.child.duration
+
+    @property
+    def duration_beats(self) -> Optional[float]:
+        return self.child.duration_beats
+
+    def eval_canvas(self, t: float) -> DMXCanvas:
+        return self.child.eval_canvas(t)
+
+    def groups(self) -> list[FixtureGroup]:
+        return self.child.groups()
+
+    def with_duration(self, target_duration: Union[float, Any]) -> AbsoluteScene:
+        return AbsoluteScene(self.child.with_duration(target_duration))
+
+    def __abs__(self) -> AbsoluteScene:
+        return self
+
+    def flicker(self, depth: float = 0.5, speed: float = 12.0, **kwargs) -> Scene:
+        return AbsoluteScene(self.child.flicker(depth=depth, speed=speed, **kwargs))
+
+    def jitter_hue(self, amount: float = 0.08, speed: float = 3.0, **kwargs) -> Scene:
+        return AbsoluteScene(self.child.jitter_hue(amount=amount, speed=speed, **kwargs))
+
+    def shift_hsv(self, dh: Union[float, Clip] = 0.0, ds: float = 0.0, dv: float = 0.0, **kwargs) -> Scene:
+        return AbsoluteScene(self.child.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs))
+
+    def __repr__(self) -> str:
+        return f"abs({self.child!r})"
 
 
 class ReverseScene(Scene):
@@ -959,30 +1070,42 @@ class ScaleScene(Scene):
         return ScaleScene(self.child.shift_hsv(dh=dh, ds=ds, dv=dv, **kwargs), factor=self.factor)
 
 
-def Sequence(*items: Union[Clip, Scene, Sequence[Union[Clip, Scene]]]) -> Union[Clip, Scene]:
-    """Compose clips or scenes sequentially in chronological time.
+class _SequenceFactory:
+    """Compose clips or scenes sequentially in chronological time (`Sequence` and `Seq`).
 
-    Supports both positional arguments and a single list/tuple:
+    Supports calling with arguments or list, as well as bracket indexing:
       `Sequence(clip1, clip2, clip3)`
       `Sequence([clip1, clip2, clip3])`
-      `Sequence(scene1, scene2, scene3)`
-      `Sequence([scene1, scene2, scene3])`
+      `Seq[clip1, clip2, clip3]`
+      `Seq(clip1, clip2, clip3)`
+      `Seq([clip1, clip2, clip3])`
     """
-    from .clips import SequenceClip
 
-    raw: list[Union[Clip, Scene]] = []
-    for item in items:
-        if isinstance(item, (list, tuple)):
-            raw.extend(item)
-        else:
-            raw.append(item)
+    def __call__(self, *items: Any) -> Union[Clip, Scene]:
+        return self._make(items)
 
-    if not raw:
-        return SequenceClip()
+    def __getitem__(self, items: Any) -> Union[Clip, Scene]:
+        if isinstance(items, (tuple, list)):
+            return self._make(items)
+        return self._make((items,))
 
-    if isinstance(raw[0], Scene):
-        return SequenceScene(*raw)
-    return SequenceClip(*raw)
+    def _make(self, items: Iterable[Any]) -> Union[Clip, Scene]:
+        from .clips import SequenceClip
+
+        raw: list[Union[Clip, Scene]] = []
+        for item in items:
+            if isinstance(item, (list, tuple)):
+                raw.extend(item)
+            else:
+                raw.append(item)
+
+        if not raw:
+            return SequenceClip()
+
+        if isinstance(raw[0], Scene):
+            return SequenceScene(*raw)
+        return SequenceClip(*raw)
 
 
+Sequence = _SequenceFactory()
 Seq = Sequence

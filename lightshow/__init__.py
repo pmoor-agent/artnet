@@ -4,6 +4,7 @@ from math import inf
 
 from .artnet import ARTNET_PORT, ArtNetClient, Rig, build_artdmx_packet
 from .clips import (
+    AbsoluteClip,
     Blackout,
     CCT,
     ChannelMapClip,
@@ -48,6 +49,7 @@ from .clips import (
 )
 from .fixtures import (
     RGB,
+    AbsoluteScene,
     BoundScene,
     Channel,
     DMXCanvas,
@@ -65,9 +67,14 @@ from .fixtures import (
 )
 from .state import Color, ParPatch, Patch
 from .tempo import (
+    Abs,
+    Absolute,
+    AbsoluteDuration,
     MusicalDuration,
     Seconds,
     Tempo,
+    abs,
+    absolute,
     bars,
     beats,
     get_tempo,
@@ -78,6 +85,11 @@ from .tempo import (
 
 __all__ = [
     "ARTNET_PORT",
+    "Abs",
+    "Absolute",
+    "AbsoluteClip",
+    "AbsoluteDuration",
+    "AbsoluteScene",
     "ArtNetClient",
     "Blackout",
     "BoundScene",
@@ -136,6 +148,8 @@ __all__ = [
     "TimeScaleClip",
     "TimeScaleScene",
     "Wait",
+    "abs",
+    "absolute",
     "bars",
     "beats",
     "build_artdmx_packet",

@@ -339,29 +339,36 @@ def bars(count: float = 1.0, tempo: Optional[Tempo] = None) -> MusicalDuration:
 
 
 # =============================================================================
-# Explicit Unscaled Wall-Clock Seconds
+# Explicit Absolute Wall-Clock Timing (`abs`, `Abs`, `Seconds`)
 # =============================================================================
 
-class Seconds:
-    """An explicit duration in wall-clock seconds.
+import builtins
 
-    When passed to clips (like `Chase(..., tail=seconds(1.0))` or
-    `Pulse(..., attack=seconds(0.1))`), it explicitly declares that this
+
+class AbsoluteDuration:
+    """An explicit absolute duration in wall-clock seconds.
+
+    When passed to clips (like `Chase(..., tail=abs(1.0))` or
+    `Pulse(..., attack=abs(0.05))`), it explicitly declares that this
     parameter represents absolute seconds that should NOT scale when the clip
     is stretched or compressed via `@ target_duration`.
     """
 
     __slots__ = ("_seconds",)
 
-    def __init__(self, s: Union[float, int, Seconds]) -> None:
-        if isinstance(s, Seconds):
+    def __init__(self, s: Union[float, int, AbsoluteDuration, Any] = 1.0) -> None:
+        if isinstance(s, AbsoluteDuration):
             self._seconds = s._seconds
         else:
-            self._seconds = max(0.0, float(s))
+            self._seconds = max(0.0, float(builtins.abs(float(s))))
 
     @property
     def seconds(self) -> float:
         return self._seconds
+
+    @property
+    def is_absolute(self) -> bool:
+        return True
 
     def __float__(self) -> float:
         return self._seconds
@@ -369,28 +376,31 @@ class Seconds:
     def __int__(self) -> int:
         return int(self._seconds)
 
+    def __abs__(self) -> AbsoluteDuration:
+        return self
+
     def __repr__(self) -> str:
-        return f"Seconds({self._seconds:g}s)"
+        return f"abs({self._seconds:g}s)"
 
     def __format__(self, format_spec: str) -> str:
         return format(self._seconds, format_spec)
 
-    def __add__(self, other: Any) -> Seconds:
-        return Seconds(self._seconds + float(other))
+    def __add__(self, other: Any) -> AbsoluteDuration:
+        return AbsoluteDuration(self._seconds + float(other))
 
-    def __radd__(self, other: Any) -> Seconds:
-        return Seconds(float(other) + self._seconds)
+    def __radd__(self, other: Any) -> AbsoluteDuration:
+        return AbsoluteDuration(float(other) + self._seconds)
 
-    def __sub__(self, other: Any) -> Seconds:
-        return Seconds(max(0.0, self._seconds - float(other)))
+    def __sub__(self, other: Any) -> AbsoluteDuration:
+        return AbsoluteDuration(max(0.0, self._seconds - float(other)))
 
-    def __rsub__(self, other: Any) -> Seconds:
-        return Seconds(max(0.0, float(other) - self._seconds))
+    def __rsub__(self, other: Any) -> AbsoluteDuration:
+        return AbsoluteDuration(max(0.0, float(other) - self._seconds))
 
-    def __mul__(self, factor: Union[float, int]) -> Seconds:
-        return Seconds(self._seconds * float(factor))
+    def __mul__(self, factor: Union[float, int]) -> AbsoluteDuration:
+        return AbsoluteDuration(self._seconds * float(factor))
 
-    def __rmul__(self, factor: Union[float, int]) -> Seconds:
+    def __rmul__(self, factor: Union[float, int]) -> AbsoluteDuration:
         return self.__mul__(factor)
 
     def __truediv__(self, divisor: Any) -> float:
@@ -419,7 +429,7 @@ class Seconds:
         return self._seconds >= float(other)
 
     def __eq__(self, other: Any) -> bool:
-        if isinstance(other, Seconds):
+        if isinstance(other, AbsoluteDuration):
             return self._seconds == other._seconds
         return math.isclose(self._seconds, float(other), rel_tol=1e-9, abs_tol=1e-9)
 
@@ -427,10 +437,31 @@ class Seconds:
         return hash(self._seconds)
 
 
-def seconds(s: float = 1.0) -> Seconds:
-    """Declare an explicit duration of `s` seconds (unscaled during time stretching)."""
-    return Seconds(s)
+# Aliases for AbsoluteDuration
+Abs = AbsoluteDuration
+Absolute = AbsoluteDuration
+Seconds = AbsoluteDuration
+seconds = AbsoluteDuration
+sec = AbsoluteDuration
 
 
-sec = seconds
+def abs(target: Any = 1.0) -> Any:
+    """Mark a Clip, Scene, or timing parameter as absolute (unscaled by time-stretching `@`).
+
+    Examples:
+      - In a sequence: `Seq[abs(intro), main_loop, abs(outro)] @ 10.0`
+        (only `main_loop` will stretch to fill the 10.0s).
+      - In a chase: `Chase(Color.WHITE, step_duration=beats(1), tail=abs(1.0))`
+        (decay tail takes exactly 1.0s, unaffected by BPM or `@` scaling).
+      - In a pulse: `Pulse(Color.RED, duration=1.0, attack=abs(0.05)) @ 5.0`
+        (attack stays at 50ms while decay stretches).
+    """
+    if hasattr(target, "__abs__") and not isinstance(target, (int, float)):
+        return target.__abs__()
+    if isinstance(target, (int, float, AbsoluteDuration)):
+        return AbsoluteDuration(builtins.abs(float(target)))
+    return builtins.abs(target)
+
+
+absolute = abs
 

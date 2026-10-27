@@ -212,23 +212,42 @@ intro = PARS(Rainbow(period=4.0)) @ bars(2)
 ```
 When tempo changes at runtime (`t.bpm = 140`), clips scaled with `@ beats(...)` or `@ bars(...)` adjust their playback rate dynamically!
 
-#### Absolute Wall-Clock Durations (`seconds(...)` / `sec(...)`)
-When scaling animations or adapting to tempo, you often want **rhythmic steps to follow the music**, but **physical decay tails or attack transients to remain invariant** (e.g. phosphor decay, laser snaps, camera shutter sync, or a fixed 1-second fade).
+#### Absolute Wall-Clock Timing (`abs()`, `Abs`, `seconds`)
+When scaling animations or adapting to tempo, you often want **rhythmic steps to follow the music**, but **physical decay tails, attack transients, or specific cue sections to remain invariant** (e.g. phosphor decay, laser snaps, camera shutter sync, or a fixed 1-second intro).
 
-Wrap any parameter in `seconds(...)` (or `sec(...)`) to lock it to wall-clock time:
+By default, bare numbers in `lightshow` scale proportionally when a clip or sequence is stretched via `@ target_duration`. Marking a clip, scene, or parameter with `abs()` locks it to **absolute wall-clock time**:
+
+##### 1. Absolute Cues in a Sequence (`abs(clip)` / `abs(scene)`)
+Wrap any cue in `abs(...)` so it resists time-stretching when the parent sequence is scaled. Only the un-anchored cues will expand or contract to fill the remainder:
 
 ```python
-from lightshow import Chase, Pulse, Color, beats, seconds
+from lightshow import Chase, Seq, Sequence, abs
 
-# Fixtures step on each musical beat, but the decay tail takes exactly 1.0 wall-clock second:
+intro = Chase(Color.RED, step_duration=0.25)    # 1.0s intro
+groove = Chase(Color.GREEN, step_duration=0.25)  # 1.0s groove
+outro = Chase(Color.BLUE, step_duration=0.25)   # 1.0s outro
+
+# Scale total sequence to 6.0s:
+# intro and outro stay fixed at 1.0s each; only groove expands to 4.0s!
+show = Seq[abs(intro), groove, abs(outro)] @ 6.0
+# Or equivalently: Sequence([abs(intro), groove, abs(outro)]) @ 6.0
+```
+
+##### 2. Absolute Timing Parameters (`tail=abs(1.0)`, `attack=abs(0.05)`)
+Wrap timing parameters in `abs(...)` (or `Abs(...)` / `seconds(...)`) so physical decay tails or attack transients remain constant regardless of BPM shifts or `@ duration` scaling:
+
+```python
+from lightshow import Chase, Pulse, Color, beats, abs
+
+# Fixtures step on each musical beat, but the decay tail takes an absolute 1.0 second:
 chase = Chase(
     Color.WHITE,
     step_duration=beats(1),     # Steps rhythmically to the tempo
-    tail=seconds(1.0),          # Physical decay takes exactly 1.0s, regardless of BPM!
+    tail=abs(1.0),              # Physical decay takes exactly 1.0s, regardless of BPM!
 )
 
 # When stretching a pulse via `@ 4.0`, attack stays 50ms while decay stretches:
-snappy_pulse = Pulse(Color.RED, duration=1.0, attack=seconds(0.05)) @ 4.0
+snappy_pulse = Pulse(Color.RED, duration=1.0, attack=abs(0.05)) @ 4.0
 # -> attack stays 0.05s, decay expands to 3.95s!
 ```
 
@@ -531,7 +550,8 @@ stop_stream()
 
 | Expression | Name | Description |
 | :--- | :--- | :--- |
-| `[A, B, C]` / `Sequence(...)` | Sequence | Play `A`, then `B`, then `C` in chronological order. |
+| `[A, B, C]` / `Seq[...]` / `Sequence(...)` | Sequence | Play `A`, then `B`, then `C` in chronological order. |
+| `abs(A)` | Absolute Timing | Lock clip, scene, or duration to resist `@ duration` scaling in sequences. |
 | `A \| B` | Layer / Override | Play `A` and `B` simultaneously (LTP override / relative offsets). |
 | `A + B` | Additive Blend | Layer with additive RGB photon mixing. |
 | `A & B` | Multiply / Mask | Scale `A` brightness or channels by scalar envelope `B`. |
@@ -554,7 +574,7 @@ stop_stream()
 | `t.sixteenth` / `t.eighth` | Subdivisions | 16th note ($0.25$ beat), 8th note ($0.5$ beat), etc. |
 | `t.triplet(subdivision)` | Triplet | Musical triplet (e.g. `t.triplet(8)` is an 8th-note triplet). |
 | `t.dotted(subdivision)` | Dotted Note | Dotted note ($1.5\times$ nominal note length). |
-| `seconds(s)` / `sec(s)` | Explicit Seconds | Wall-clock seconds that remain unscaled during `@ duration` stretching or tempo shifts. |
+| `abs(s)` / `Abs(s)` / `seconds(s)` | Absolute Duration | Explicit wall-clock duration that resists `@ duration` scaling. |
 | `t.tap()` | Tap Tempo | Average tap intervals and update BPM dynamically. |
 | `t.bpm = 135` | Live BPM Modulation | Dynamically speeds up/slows down all bound clips with zero phase glitch. |
 
