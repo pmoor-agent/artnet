@@ -539,6 +539,15 @@ class TestLightshow(unittest.TestCase):
         self.assertAlmostEqual(white_desat.g, 1.0, places=4)
         self.assertAlmostEqual(white_desat.b, 1.0, places=4)
 
+        # Dimming and scaling Color
+        white = Color(1.0, 1.0, 1.0)
+        self.assertEqual(white * 0.5, Color(0.5, 0.5, 0.5))
+        self.assertEqual(0.5 * white, Color(0.5, 0.5, 0.5))
+        self.assertEqual(white / 2.0, Color(0.5, 0.5, 0.5))
+        self.assertEqual(white.dim(0.5), Color(0.5, 0.5, 0.5))
+        self.assertEqual(white.scale(0.5), Color(0.5, 0.5, 0.5))
+        self.assertEqual(white.shift_hsv(dv=-0.5), Color(0.5, 0.5, 0.5))
+
     def test_flicker_and_fixture_decorrelation(self) -> None:
         """Verify Flicker modulation and per-fixture decorrelation."""
         base = Hold(Color.RED)

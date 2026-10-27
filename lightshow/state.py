@@ -67,6 +67,20 @@ class Color:
     def __rmul__(self, factor: float) -> Color:
         return self.__mul__(factor)
 
+    def __truediv__(self, divisor: float) -> Color:
+        """Divide RGB channels by a scalar divisor (e.g. `color / 2`)."""
+        if divisor == 0:
+            raise ZeroDivisionError("Color division by zero")
+        return self.__mul__(1.0 / divisor)
+
+    def dim(self, factor: float) -> Color:
+        """Dim/scale brightness by a factor in [0.0, 1.0] (e.g. `color.dim(0.5)`)."""
+        return self.__mul__(factor)
+
+    def scale(self, factor: float) -> Color:
+        """Scale brightness by `factor` (e.g. `color.scale(0.5)`)."""
+        return self.__mul__(factor)
+
     def __add__(self, other: Color) -> Color:
         return Color(
             r=min(1.0, self.r + other.r),
